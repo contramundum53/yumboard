@@ -166,33 +166,12 @@ body {
   -webkit-appearance: none;
   writing-mode: vertical-lr;
   direction: rtl;
-  width: 8px;
+  width: 26px;
   height: 130px;
   margin: 0;
   background: rgba(35, 45, 65, 0.18);
-}
-
-#size::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 0;
-  height: 0;
-  border-left: 8px solid transparent;
-  border-right: 8px solid transparent;
-  border-top: 14px solid var(--ink);
-  background: none;
-  cursor: pointer;
-  box-shadow: 0 4px 10px rgba(18, 30, 52, 0.25);
-}
-
-#size::-moz-range-thumb {
-  width: 0;
-  height: 0;
-  border-left: 8px solid transparent;
-  border-right: 8px solid transparent;
-  border-top: 14px solid var(--ink);
-  background: none;
-  cursor: pointer;
-  box-shadow: 0 4px 10px rgba(18, 30, 52, 0.25);
+  clip-path: polygon(50% 100%, 100% 0, 0 0);
+  -webkit-clip-path: polygon(50% 100%, 100% 0, 0 0);
 }
 
 .control input[type="range"]::-webkit-slider-thumb {
