@@ -16,7 +16,9 @@ use crate::state::AppState;
 
 #[tokio::main]
 async fn main() {
-    let session_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../sessions");
+    let args: Vec<String> = std::env::args().collect();
+    let session_dir = parse_path_arg(&args, "--session-dir")
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../sessions"));
     if let Err(error) = tokio::fs::create_dir_all(&session_dir).await {
         eprintln!("Failed to create session dir: {error}");
     }
@@ -25,7 +27,8 @@ async fn main() {
         session_dir,
     };
 
-    let public_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../public");
+    let public_dir = parse_path_arg(&args, "--public-dir")
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../public"));
     let index_file = public_dir.join("index.html");
 
     let app = Router::new()
@@ -49,4 +52,12 @@ async fn main() {
     axum::serve(listener, app)
         .await
         .expect("Server crashed");
+}
+
+fn parse_path_arg(args: &[String], name: &str) -> Option<PathBuf> {
+    let value = args
+        .iter()
+        .position(|arg| arg == name)
+        .and_then(|index| args.get(index + 1));
+    value.map(PathBuf::from)
 }
