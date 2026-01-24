@@ -120,6 +120,7 @@ pub fn run() -> Result<(), JsValue> {
 
     let color_input: HtmlInputElement = get_element(&document, "color")?;
     let palette_el: HtmlElement = get_element(&document, "palette")?;
+    let palette_add: HtmlButtonElement = get_element(&document, "paletteAdd")?;
     let size_input: HtmlInputElement = get_element(&document, "size")?;
     let size_value: HtmlSpanElement = get_element(&document, "sizeValue")?;
     let clear_button: HtmlButtonElement = get_element(&document, "clear")?;
@@ -183,10 +184,7 @@ pub fn run() -> Result<(), JsValue> {
     set_tool_button(&pan_button, false);
     set_canvas_mode(&canvas, Tool::Draw, false);
     {
-        let mut state = state.borrow_mut();
-        if let Some(color) = normalize_palette_color(&color_input.value()) {
-            add_color_to_palette(&mut state.palette, &color);
-        }
+        let state = state.borrow();
         render_palette(&document, &palette_el, &state.palette, &color_input.value());
     }
 
@@ -468,8 +466,7 @@ pub fn run() -> Result<(), JsValue> {
                 None => return,
             };
             color_input.set_value(&color);
-            let mut state = palette_state.borrow_mut();
-            add_color_to_palette(&mut state.palette, &color);
+            let state = palette_state.borrow_mut();
             render_palette(&document, &palette_el_cb, &state.palette, &color_input.value());
         });
         palette_el_listener.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
@@ -480,16 +477,16 @@ pub fn run() -> Result<(), JsValue> {
         let palette_state = state.clone();
         let palette_el_cb = palette_el.clone();
         let color_input_cb = color_input.clone();
-        let color_input_listener = color_input.clone();
+        let palette_add_listener = palette_add.clone();
         let document = document.clone();
-        let oninput = Closure::<dyn FnMut(Event)>::new(move |_| {
+        let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let color = color_input_cb.value();
             let mut state = palette_state.borrow_mut();
             add_color_to_palette(&mut state.palette, &color);
             render_palette(&document, &palette_el_cb, &state.palette, &color_input_cb.value());
         });
-        color_input_listener.add_event_listener_with_callback("input", oninput.as_ref().unchecked_ref())?;
-        oninput.forget();
+        palette_add_listener.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
+        onclick.forget();
     }
 
     {
