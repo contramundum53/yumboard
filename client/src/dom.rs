@@ -9,7 +9,7 @@ use pfboard_shared::Point;
 
 use crate::geometry::normalize_point;
 use crate::render::redraw;
-use crate::state::{State, Tool};
+use crate::state::{Mode, State};
 
 pub fn get_element<T: JsCast>(document: &Document, id: &str) -> Result<T, JsValue> {
     let element = document
@@ -29,18 +29,18 @@ pub fn set_tool_button(button: &web_sys::HtmlButtonElement, active: bool) {
     let _ = button.set_attribute("aria-pressed", pressed);
 }
 
-pub fn set_canvas_mode(canvas: &HtmlCanvasElement, tool: Tool, dragging: bool) {
-    let cursor = match tool {
-        Tool::Pan => {
+pub fn set_canvas_mode(canvas: &HtmlCanvasElement, mode: &Mode, dragging: bool) {
+    let cursor = match mode {
+        Mode::Pan(_) => {
             if dragging {
                 "grabbing"
             } else {
                 "grab"
             }
         }
-        Tool::Erase => "cell",
-        Tool::Draw => "crosshair",
-        Tool::Select => "default",
+        Mode::Erase(_) => "cell",
+        Mode::Draw(_) => "crosshair",
+        Mode::Select(_) => "default",
     };
     if let Ok(element) = canvas.clone().dyn_into::<HtmlElement>() {
         let _ = element.style().set_property("cursor", cursor);

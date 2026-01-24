@@ -31,7 +31,7 @@ use crate::persistence::{build_pdf_html, open_print_window, parse_load_payload, 
 use crate::render::redraw;
 use crate::state::{
     DrawMode, DrawState, EraseMode, Mode, PanMode, ScaleAxis, SelectMode, SelectState,
-    SelectionHit, State, Tool, DEFAULT_PALETTE,
+    SelectionHit, State, DEFAULT_PALETTE,
 };
 use crate::util::make_id;
 
@@ -104,7 +104,7 @@ pub fn run() -> Result<(), JsValue> {
     set_tool_button(&lasso_button, false);
     set_tool_button(&eraser_button, false);
     set_tool_button(&pan_button, false);
-    set_canvas_mode(&canvas, Tool::Draw, false);
+    set_canvas_mode(&canvas, &state.borrow().mode, false);
     {
         let state = state.borrow();
         if let Some(index) = state.palette_selected() {
@@ -291,11 +291,13 @@ pub fn run() -> Result<(), JsValue> {
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = tool_state.borrow_mut();
             state.mode = Mode::Erase(EraseMode::Idle);
-            let tool = state.tool();
-            set_tool_button(&pan_button_cb, tool == Tool::Pan);
-            set_tool_button(&eraser_button_cb, tool == Tool::Erase);
-            set_tool_button(&lasso_button_cb, tool == Tool::Select);
-            set_canvas_mode(&state.canvas, tool, false);
+            let is_pan = matches!(state.mode, Mode::Pan(_));
+            let is_erase = matches!(state.mode, Mode::Erase(_));
+            let is_select = matches!(state.mode, Mode::Select(_));
+            set_tool_button(&pan_button_cb, is_pan);
+            set_tool_button(&eraser_button_cb, is_erase);
+            set_tool_button(&lasso_button_cb, is_select);
+            set_canvas_mode(&state.canvas, &state.mode, false);
             render_palette(
                 &document,
                 &palette_el_cb,
@@ -321,11 +323,13 @@ pub fn run() -> Result<(), JsValue> {
                 selected_ids: Vec::new(),
                 mode: SelectMode::Idle,
             });
-            let tool = state.tool();
-            set_tool_button(&eraser_button_cb, tool == Tool::Erase);
-            set_tool_button(&pan_button_cb, tool == Tool::Pan);
-            set_tool_button(&lasso_button_cb, tool == Tool::Select);
-            set_canvas_mode(&state.canvas, tool, false);
+            let is_pan = matches!(state.mode, Mode::Pan(_));
+            let is_erase = matches!(state.mode, Mode::Erase(_));
+            let is_select = matches!(state.mode, Mode::Select(_));
+            set_tool_button(&eraser_button_cb, is_erase);
+            set_tool_button(&pan_button_cb, is_pan);
+            set_tool_button(&lasso_button_cb, is_select);
+            set_canvas_mode(&state.canvas, &state.mode, false);
             render_palette(
                 &document,
                 &palette_el_cb,
@@ -347,12 +351,8 @@ pub fn run() -> Result<(), JsValue> {
         let document = document.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = tool_state.borrow_mut();
-            let next_tool = if state.tool() == Tool::Pan {
-                Tool::Draw
-            } else {
-                Tool::Pan
-            };
-            if next_tool == Tool::Draw {
+            let going_to_pan = !matches!(state.mode, Mode::Pan(_));
+            if !going_to_pan {
                 if state.palette_last_selected >= state.palette.len() {
                     state.palette_last_selected = 0;
                 }
@@ -372,10 +372,13 @@ pub fn run() -> Result<(), JsValue> {
             } else {
                 state.mode = Mode::Pan(PanMode::Idle);
             }
-            set_tool_button(&eraser_button_cb, next_tool == Tool::Erase);
-            set_tool_button(&pan_button_cb, next_tool == Tool::Pan);
-            set_tool_button(&lasso_button_cb, next_tool == Tool::Select);
-            set_canvas_mode(&state.canvas, next_tool, false);
+            let is_pan = matches!(state.mode, Mode::Pan(_));
+            let is_erase = matches!(state.mode, Mode::Erase(_));
+            let is_select = matches!(state.mode, Mode::Select(_));
+            set_tool_button(&eraser_button_cb, is_erase);
+            set_tool_button(&pan_button_cb, is_pan);
+            set_tool_button(&lasso_button_cb, is_select);
+            set_canvas_mode(&state.canvas, &state.mode, false);
             render_palette(
                 &document,
                 &palette_el_cb,
@@ -402,10 +405,17 @@ pub fn run() -> Result<(), JsValue> {
                 None => return,
             };
             let mut state = palette_state.borrow_mut();
+            if !matches!(state.mode, Mode::Draw(_)) {
+                state.mode = Mode::Draw(DrawState {
+                    mode: DrawMode::Idle,
+                    palette_selected: state.palette_selected(),
+                    palette_add_mode: false,
+                });
+            }
             set_tool_button(&eraser_button_cb, false);
             set_tool_button(&pan_button_cb, false);
             set_tool_button(&lasso_button_cb, false);
-            set_canvas_mode(&state.canvas, Tool::Draw, false);
+            set_canvas_mode(&state.canvas, &state.mode, false);
             match action {
                 PaletteAction::Add => {
                     state.mode = Mode::Draw(DrawState {
@@ -426,7 +436,7 @@ pub fn run() -> Result<(), JsValue> {
                         return;
                     }
                     let already_selected = state.palette_selected() == Some(index);
-                    if already_selected && state.tool() == Tool::Draw {
+                    if already_selected && matches!(state.mode, Mode::Draw(_)) {
                         if let Mode::Draw(draw) = &mut state.mode {
                             draw.palette_add_mode = false;
                         }
@@ -691,8 +701,15 @@ pub fn run() -> Result<(), JsValue> {
                 return;
             }
             event.prevent_default();
-            let tool = { down_state.borrow().tool() };
-            if tool == Tool::Select {
+            let (is_select, is_pan, is_erase) = {
+                let state = down_state.borrow();
+                (
+                    matches!(state.mode, Mode::Select(_)),
+                    matches!(state.mode, Mode::Pan(_)),
+                    matches!(state.mode, Mode::Erase(_)),
+                )
+            };
+            if is_select {
                 let rect = down_canvas.get_bounding_client_rect();
                 let screen_x = event.client_x() as f64 - rect.left();
                 let screen_y = event.client_y() as f64 - rect.top();
@@ -838,7 +855,7 @@ pub fn run() -> Result<(), JsValue> {
                 let _ = down_canvas.set_pointer_capture(event.pointer_id());
                 return;
             }
-            if tool == Tool::Pan {
+            if is_pan {
                 let mut state = down_state.borrow_mut();
                 state.mode = Mode::Pan(PanMode::Active {
                     start_x: event.client_x() as f64,
@@ -846,7 +863,7 @@ pub fn run() -> Result<(), JsValue> {
                     origin_x: state.pan_x,
                     origin_y: state.pan_y,
                 });
-                set_canvas_mode(&state.canvas, Tool::Pan, true);
+                set_canvas_mode(&state.canvas, &state.mode, true);
                 let _ = down_canvas.set_pointer_capture(event.pointer_id());
                 return;
             }
@@ -872,7 +889,7 @@ pub fn run() -> Result<(), JsValue> {
                 Some(point) => point,
                 None => return,
             };
-            if tool == Tool::Erase {
+            if is_erase {
                 let removed_ids = {
                     let mut state = down_state.borrow_mut();
                     state.mode = Mode::Erase(EraseMode::Active {
@@ -1015,7 +1032,7 @@ pub fn run() -> Result<(), JsValue> {
                         }
                         SelectMode::Idle => {
                             if hit.is_some() {
-                                set_canvas_mode(&state.canvas, Tool::Select, false);
+                                set_canvas_mode(&state.canvas, &state.mode, false);
                             }
                         }
                     }
@@ -1132,7 +1149,7 @@ pub fn run() -> Result<(), JsValue> {
                 }
                 Mode::Pan(PanMode::Active { .. }) => {
                     state.mode = Mode::Pan(PanMode::Idle);
-                    set_canvas_mode(&state.canvas, Tool::Pan, false);
+                    set_canvas_mode(&state.canvas, &state.mode, false);
                 }
                 Mode::Draw(draw) => {
                     let id = match &draw.mode {

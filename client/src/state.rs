@@ -8,14 +8,6 @@ use pfboard_shared::{Point, Stroke};
 pub const DEFAULT_PALETTE: [&str; 1] = ["#1f1f1f"];
 pub const STROKE_UNIT: f64 = 1.0;
 
-#[derive(Clone, Copy, PartialEq)]
-pub enum Tool {
-    Draw,
-    Erase,
-    Pan,
-    Select,
-}
-
 #[derive(Clone, Copy)]
 pub enum ScaleAxis {
     Both,
@@ -110,22 +102,7 @@ pub struct State {
     pub mode: Mode,
 }
 
-impl Mode {
-    pub fn tool(&self) -> Tool {
-        match self {
-            Mode::Draw(_) => Tool::Draw,
-            Mode::Erase(_) => Tool::Erase,
-            Mode::Pan(_) => Tool::Pan,
-            Mode::Select(_) => Tool::Select,
-        }
-    }
-}
-
 impl State {
-    pub fn tool(&self) -> Tool {
-        self.mode.tool()
-    }
-
     pub fn palette_selected(&self) -> Option<usize> {
         match &self.mode {
             Mode::Draw(draw) => draw.palette_selected,
