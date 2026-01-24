@@ -6,8 +6,8 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
     CanvasRenderingContext2d, Document, Element, Event, FileReader, HtmlAnchorElement,
-    HtmlButtonElement, HtmlCanvasElement, HtmlElement, HtmlIFrameElement, HtmlInputElement,
-    HtmlSpanElement, KeyboardEvent, MessageEvent, PointerEvent, ProgressEvent, WebSocket, Window,
+    HtmlButtonElement, HtmlCanvasElement, HtmlElement, HtmlInputElement, HtmlSpanElement,
+    KeyboardEvent, MessageEvent, PointerEvent, ProgressEvent, WebSocket, Window,
 };
 
 use pfboard_shared::{ClientMessage, Point, ServerMessage, Stroke};
@@ -1686,6 +1686,11 @@ fn point_in_polygon(point: Point, polygon: &[Point]) -> bool {
 }
 
 fn build_pdf_html(state: &State, include_background: bool) -> String {
+    let size = if state.board_scale > 0.0 {
+        state.board_scale
+    } else {
+        1.0
+    };
     let mut paths = String::new();
     for stroke in &state.strokes {
         if stroke.points.is_empty() {
@@ -1693,8 +1698,8 @@ fn build_pdf_html(state: &State, include_background: bool) -> String {
         }
         let mut data = String::new();
         for (index, point) in stroke.points.iter().enumerate() {
-            let x = point.x as f64 * state.board_scale;
-            let y = point.y as f64 * state.board_scale;
+            let x = point.x as f64 * size;
+            let y = point.y as f64 * size;
             if index == 0 {
                 data.push_str(&format!("M {} {}", x, y));
             } else {
@@ -1709,8 +1714,8 @@ fn build_pdf_html(state: &State, include_background: bool) -> String {
         ));
         if stroke.points.len() == 1 {
             let p = stroke.points[0];
-            let cx = p.x as f64 * state.board_scale;
-            let cy = p.y as f64 * state.board_scale;
+            let cx = p.x as f64 * size;
+            let cy = p.y as f64 * size;
             let r = stroke.size as f64 / 2.0;
             paths.push_str(&format!(
                 "<circle cx=\"{}\" cy=\"{}\" r=\"{}\" fill=\"{}\" />",
@@ -1727,44 +1732,20 @@ fn build_pdf_html(state: &State, include_background: bool) -> String {
 
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\" /><style>@page{{margin:0;}}body{{margin:0;}}svg{{width:100vw;height:100vh;}}</style></head><body><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {size} {size}\">{background}{paths}</svg><script>window.onload=()=>{{window.print();}}</script></body></html>",
-        size = state.board_scale,
+        size = size,
         background = background,
         paths = paths
     )
 }
 
 fn open_print_window(document: &Document, html: &str) {
-    let blob_parts = js_sys::Array::new();
-    blob_parts.push(&JsValue::from_str(html));
-    let blob = match web_sys::Blob::new_with_str_sequence(&blob_parts) {
-        Ok(blob) => blob,
-        Err(_) => return,
+    let window = match document.default_view() {
+        Some(window) => window,
+        None => return,
     };
-    let url = match web_sys::Url::create_object_url_with_blob(&blob) {
-        Ok(url) => url,
-        Err(_) => return,
-    };
-
-    let iframe: HtmlIFrameElement = match document
-        .create_element("iframe")
-        .ok()
-        .and_then(|element| element.dyn_into::<HtmlIFrameElement>().ok())
-    {
-        Some(frame) => frame,
-        None => {
-            let _ = web_sys::Url::revoke_object_url(&url);
-            return;
-        }
-    };
-    let _ = iframe.set_attribute(
-        "style",
-        "position:fixed;right:0;bottom:0;width:0;height:0;border:0;",
-    );
-    iframe.set_src(&url);
-    if let Some(body) = document.body() {
-        let _ = body.append_child(&iframe);
-    }
-    let _ = web_sys::Url::revoke_object_url(&url);
+    let encoded = js_sys::encode_uri_component(html);
+    let url = format!("data:text/html;charset=utf-8,{encoded}");
+    let _ = window.open_with_url_and_target(&url, "_blank");
 }
 
 fn start_stroke(state: &mut State, id: String, color: String, size: f32, point: Point) {
