@@ -47,6 +47,8 @@ pub enum ClientMessage {
     Undo,
     #[serde(rename = "redo")]
     Redo,
+    #[serde(rename = "erase")]
+    Erase { id: String },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

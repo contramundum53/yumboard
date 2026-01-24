@@ -12,6 +12,12 @@ use web_sys::{
 
 use pfboard_shared::{ClientMessage, Point, ServerMessage, Stroke};
 
+#[derive(Clone, Copy, PartialEq)]
+enum Tool {
+    Draw,
+    Erase,
+}
+
 struct State {
     canvas: HtmlCanvasElement,
     ctx: CanvasRenderingContext2d,
@@ -21,6 +27,9 @@ struct State {
     board_height: f64,
     current_id: Option<String>,
     drawing: bool,
+    erasing: bool,
+    tool: Tool,
+    erase_hits: HashSet<String>,
 }
 
 #[wasm_bindgen(start)]
@@ -44,6 +53,7 @@ pub fn run() -> Result<(), JsValue> {
     let size_input: HtmlInputElement = get_element(&document, "size")?;
     let size_value: HtmlSpanElement = get_element(&document, "sizeValue")?;
     let clear_button: HtmlButtonElement = get_element(&document, "clear")?;
+    let eraser_button: HtmlButtonElement = get_element(&document, "eraser")?;
     let status_el = document
         .get_element_by_id("status")
         .ok_or_else(|| JsValue::from_str("Missing status element"))?;
@@ -60,10 +70,14 @@ pub fn run() -> Result<(), JsValue> {
         board_height: 0.0,
         current_id: None,
         drawing: false,
+        erasing: false,
+        tool: Tool::Draw,
+        erase_hits: HashSet::new(),
     }));
 
     update_size_label(&size_input, &size_value);
     set_status(&status_el, &status_text, "connecting", "Connecting...");
+    set_tool_button(&eraser_button, false);
 
     let ws_url = websocket_url(&window)?;
     let socket = Rc::new(WebSocket::new(&ws_url)?);
@@ -198,6 +212,26 @@ pub fn run() -> Result<(), JsValue> {
     }
 
     {
+        let tool_state = state.clone();
+        let eraser_button_cb = eraser_button.clone();
+        let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
+            let mut state = tool_state.borrow_mut();
+            state.tool = if state.tool == Tool::Draw {
+                Tool::Erase
+            } else {
+                Tool::Draw
+            };
+            state.drawing = false;
+            state.current_id = None;
+            state.erasing = false;
+            state.erase_hits.clear();
+            set_tool_button(&eraser_button_cb, state.tool == Tool::Erase);
+        });
+        eraser_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
+        onclick.forget();
+    }
+
+    {
         let clear_state = state.clone();
         let clear_socket = socket.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
@@ -222,10 +256,24 @@ pub fn run() -> Result<(), JsValue> {
                 return;
             }
             event.prevent_default();
+            let tool = { down_state.borrow().tool };
             let point = match event_to_point(&down_canvas, &event) {
                 Some(point) => point,
                 None => return,
             };
+            if tool == Tool::Erase {
+                let removed_ids = {
+                    let mut state = down_state.borrow_mut();
+                    state.erasing = true;
+                    state.erase_hits.clear();
+                    erase_hits_at_point(&mut state, point)
+                };
+                for id in removed_ids {
+                    send_message(&down_socket, &ClientMessage::Erase { id });
+                }
+                let _ = down_canvas.set_pointer_capture(event.pointer_id());
+                return;
+            }
             let id = make_id();
             let color = down_color.value();
             let size = sanitize_size(down_size.value_as_number() as f32);
@@ -257,6 +305,25 @@ pub fn run() -> Result<(), JsValue> {
         let move_socket = socket.clone();
         let move_canvas = canvas.clone();
         let onmove = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
+            let tool = { move_state.borrow().tool };
+            if tool == Tool::Erase {
+                let point = match event_to_point(&move_canvas, &event) {
+                    Some(point) => point,
+                    None => return,
+                };
+                let removed_ids = {
+                    let mut state = move_state.borrow_mut();
+                    if !state.erasing {
+                        return;
+                    }
+                    erase_hits_at_point(&mut state, point)
+                };
+                for id in removed_ids {
+                    send_message(&move_socket, &ClientMessage::Erase { id });
+                }
+                return;
+            }
+
             let (id, point, last_point) = {
                 let state = move_state.borrow();
                 if !state.drawing {
@@ -296,15 +363,18 @@ pub fn run() -> Result<(), JsValue> {
         let stop_socket = socket.clone();
         let stop_canvas = canvas.clone();
         let onstop = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
-            let id = {
+            let mode = {
                 let state = stop_state.borrow();
-                if !state.drawing {
-                    return;
+                if state.drawing {
+                    Some(Tool::Draw)
+                } else if state.erasing {
+                    Some(Tool::Erase)
+                } else {
+                    None
                 }
-                state.current_id.clone()
             };
 
-            let Some(id) = id else {
+            let Some(mode) = mode else {
                 return;
             };
 
@@ -312,6 +382,22 @@ pub fn run() -> Result<(), JsValue> {
             if stop_canvas.has_pointer_capture(event.pointer_id()) {
                 let _ = stop_canvas.release_pointer_capture(event.pointer_id());
             }
+
+            if mode == Tool::Erase {
+                let mut state = stop_state.borrow_mut();
+                state.erasing = false;
+                state.erase_hits.clear();
+                return;
+            }
+
+            let id = {
+                let state = stop_state.borrow();
+                state.current_id.clone()
+            };
+
+            let Some(id) = id else {
+                return;
+            };
 
             {
                 let mut state = stop_state.borrow_mut();
@@ -351,6 +437,11 @@ fn websocket_url(window: &Window) -> Result<String, JsValue> {
 
 fn update_size_label(input: &HtmlInputElement, value: &HtmlSpanElement) {
     value.set_text_content(Some(&input.value()));
+}
+
+fn set_tool_button(button: &HtmlButtonElement, active: bool) {
+    let pressed = if active { "true" } else { "false" };
+    let _ = button.set_attribute("aria-pressed", pressed);
 }
 
 fn set_status(status_el: &Element, status_text: &Element, state: &str, text: &str) {
@@ -572,6 +663,79 @@ fn restore_stroke(state: &mut State, mut stroke: Stroke) {
         .collect();
     state.strokes.push(stroke);
     redraw(state);
+}
+
+fn erase_hits_at_point(state: &mut State, point: Point) -> Vec<String> {
+    if state.board_width <= 0.0 || state.board_height <= 0.0 {
+        return Vec::new();
+    }
+    let px = point.x as f64 * state.board_width;
+    let py = point.y as f64 * state.board_height;
+    let mut removed = Vec::new();
+    let mut index = state.strokes.len();
+
+    while index > 0 {
+        index -= 1;
+        let stroke = &state.strokes[index];
+        if state.erase_hits.contains(&stroke.id) {
+            continue;
+        }
+        if stroke_hit(stroke, px, py, state.board_width, state.board_height) {
+            let id = stroke.id.clone();
+            state.strokes.remove(index);
+            state.active_ids.remove(&id);
+            state.erase_hits.insert(id.clone());
+            removed.push(id);
+        }
+    }
+
+    if !removed.is_empty() {
+        redraw(state);
+    }
+
+    removed
+}
+
+fn stroke_hit(stroke: &Stroke, px: f64, py: f64, width: f64, height: f64) -> bool {
+    if stroke.points.is_empty() {
+        return false;
+    }
+    let threshold = (stroke.size as f64 / 2.0).max(6.0);
+    if stroke.points.len() == 1 {
+        let point = stroke.points[0];
+        let dx = point.x as f64 * width - px;
+        let dy = point.y as f64 * height - py;
+        return dx * dx + dy * dy <= threshold * threshold;
+    }
+    for window in stroke.points.windows(2) {
+        let start = window[0];
+        let end = window[1];
+        let distance = distance_to_segment(
+            px,
+            py,
+            start.x as f64 * width,
+            start.y as f64 * height,
+            end.x as f64 * width,
+            end.y as f64 * height,
+        );
+        if distance <= threshold {
+            return true;
+        }
+    }
+    false
+}
+
+fn distance_to_segment(px: f64, py: f64, x1: f64, y1: f64, x2: f64, y2: f64) -> f64 {
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    if dx.abs() < f64::EPSILON && dy.abs() < f64::EPSILON {
+        return ((px - x1).powi(2) + (py - y1).powi(2)).sqrt();
+    }
+    let t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy);
+    let t = t.clamp(0.0, 1.0);
+    let proj_x = x1 + t * dx;
+    let proj_y = y1 + t * dy;
+    ((px - proj_x).powi(2) + (py - proj_y).powi(2)).sqrt()
 }
 
 fn adopt_strokes(state: &mut State, strokes: Vec<Stroke>) {

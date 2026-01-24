@@ -28,8 +28,14 @@ struct AppState {
 
 #[derive(Default)]
 struct ClientHistory {
-    undo: Vec<Stroke>,
-    redo: Vec<Stroke>,
+    undo: Vec<Action>,
+    redo: Vec<Action>,
+}
+
+enum Action {
+    AddStroke(Stroke),
+    EraseStroke(Stroke),
+    Clear { strokes: Vec<Stroke> },
 }
 
 #[tokio::main]
@@ -102,13 +108,15 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
             Message::Text(text) => {
                 let parsed = serde_json::from_str::<ClientMessage>(&text);
                 if let Ok(client_message) = parsed {
-                    if let Some((server_message, include_sender)) =
+                    if let Some((server_messages, include_sender)) =
                         apply_client_message(&state, connection_id, client_message).await
                     {
-                        if include_sender {
-                            broadcast_all(&state, server_message).await;
-                        } else {
-                            broadcast_except(&state, connection_id, server_message).await;
+                        for server_message in server_messages {
+                            if include_sender {
+                                broadcast_all(&state, server_message).await;
+                            } else {
+                                broadcast_except(&state, connection_id, server_message).await;
+                            }
                         }
                     }
                 }
@@ -127,7 +135,7 @@ async fn apply_client_message(
     state: &AppState,
     sender: Uuid,
     message: ClientMessage,
-) -> Option<(ServerMessage, bool)> {
+) -> Option<(Vec<ServerMessage>, bool)> {
     match message {
         ClientMessage::StrokeStart {
             id,
@@ -172,12 +180,12 @@ async fn apply_client_message(
             state.owners.write().await.insert(id.clone(), sender);
 
             Some((
-                ServerMessage::StrokeStart {
+                vec![ServerMessage::StrokeStart {
                     id,
                     color,
                     size,
                     point,
-                },
+                }],
                 false,
             ))
         }
@@ -202,7 +210,7 @@ async fn apply_client_message(
             }
 
             if appended {
-                Some((ServerMessage::StrokeMove { id, point }, false))
+                Some((vec![ServerMessage::StrokeMove { id, point }], false))
             } else {
                 None
             }
@@ -221,70 +229,135 @@ async fn apply_client_message(
                     if let Some(stroke) = stroke {
                         let mut histories = state.histories.write().await;
                         if let Some(history) = histories.get_mut(&sender) {
-                            history.undo.push(stroke);
+                            history.undo.push(Action::AddStroke(stroke));
                             history.redo.clear();
                         }
                     }
                 }
             }
-            Some((ServerMessage::StrokeEnd { id }, false))
+            Some((vec![ServerMessage::StrokeEnd { id }], false))
         }
         ClientMessage::Clear => {
-            state.strokes.write().await.clear();
+            let cleared = state.strokes.write().await.drain(..).collect::<Vec<_>>();
             state.active_ids.write().await.clear();
             state.owners.write().await.clear();
             let mut histories = state.histories.write().await;
-            for history in histories.values_mut() {
-                history.undo.clear();
+            if let Some(history) = histories.get_mut(&sender) {
+                history.undo.push(Action::Clear { strokes: cleared });
                 history.redo.clear();
             }
-            Some((ServerMessage::Clear, false))
+            Some((vec![ServerMessage::Clear], false))
         }
         ClientMessage::Undo => {
-            let stroke = {
+            let action = {
                 let mut histories = state.histories.write().await;
                 histories.get_mut(&sender).and_then(|history| history.undo.pop())
             }?;
-            let stroke_id = stroke.id.clone();
 
-            let removed = {
-                let mut strokes = state.strokes.write().await;
-                if let Some(index) = strokes.iter().position(|s| s.id == stroke_id) {
-                    strokes.remove(index);
-                    true
-                } else {
-                    false
+            match action {
+                Action::AddStroke(stroke) => {
+                    let stroke_id = stroke.id.clone();
+                    if remove_stroke(state, &stroke_id).await {
+                        let mut histories = state.histories.write().await;
+                        if let Some(history) = histories.get_mut(&sender) {
+                            history.redo.push(Action::AddStroke(stroke));
+                        }
+                        Some((vec![ServerMessage::StrokeRemove { id: stroke_id }], true))
+                    } else {
+                        None
+                    }
                 }
-            };
-
-            if removed {
-                state.active_ids.write().await.remove(&stroke_id);
-                let mut histories = state.histories.write().await;
-                if let Some(history) = histories.get_mut(&sender) {
-                    history.redo.push(stroke);
+                Action::EraseStroke(stroke) => {
+                    add_stroke(state, stroke.clone(), Some(sender)).await;
+                    let mut histories = state.histories.write().await;
+                    if let Some(history) = histories.get_mut(&sender) {
+                        history.redo.push(Action::EraseStroke(stroke.clone()));
+                    }
+                    Some((vec![ServerMessage::StrokeRestore { stroke }], true))
                 }
-                Some((ServerMessage::StrokeRemove { id: stroke_id }, true))
-            } else {
-                None
+                Action::Clear { strokes } => {
+                    for stroke in &strokes {
+                        add_stroke(state, stroke.clone(), None).await;
+                    }
+                    let mut histories = state.histories.write().await;
+                    if let Some(history) = histories.get_mut(&sender) {
+                        history.redo.push(Action::Clear {
+                            strokes: strokes.clone(),
+                        });
+                    }
+                    let messages = strokes
+                        .into_iter()
+                        .map(|stroke| ServerMessage::StrokeRestore { stroke })
+                        .collect::<Vec<_>>();
+                    Some((messages, true))
+                }
             }
         }
         ClientMessage::Redo => {
-            let stroke = {
+            let action = {
                 let mut histories = state.histories.write().await;
                 histories.get_mut(&sender).and_then(|history| history.redo.pop())
             }?;
 
-            {
+            match action {
+                Action::AddStroke(stroke) => {
+                    add_stroke(state, stroke.clone(), Some(sender)).await;
+                    let mut histories = state.histories.write().await;
+                    if let Some(history) = histories.get_mut(&sender) {
+                        history.undo.push(Action::AddStroke(stroke.clone()));
+                    }
+                    Some((vec![ServerMessage::StrokeRestore { stroke }], true))
+                }
+                Action::EraseStroke(stroke) => {
+                    let stroke_id = stroke.id.clone();
+                    if remove_stroke(state, &stroke_id).await {
+                        let mut histories = state.histories.write().await;
+                        if let Some(history) = histories.get_mut(&sender) {
+                            history.undo.push(Action::EraseStroke(stroke));
+                        }
+                        Some((vec![ServerMessage::StrokeRemove { id: stroke_id }], true))
+                    } else {
+                        None
+                    }
+                }
+                Action::Clear { strokes } => {
+                    state.strokes.write().await.clear();
+                    state.active_ids.write().await.clear();
+                    state.owners.write().await.clear();
+                    let mut histories = state.histories.write().await;
+                    if let Some(history) = histories.get_mut(&sender) {
+                        history.undo.push(Action::Clear { strokes });
+                    }
+                    Some((vec![ServerMessage::Clear], true))
+                }
+            }
+        }
+        ClientMessage::Erase { id } => {
+            if id.is_empty() || id.len() > 64 {
+                return None;
+            }
+
+            let removed = {
                 let mut strokes = state.strokes.write().await;
-                strokes.push(stroke.clone());
-            }
+                if let Some(index) = strokes.iter().position(|s| s.id == id) {
+                    Some(strokes.remove(index))
+                } else {
+                    None
+                }
+            };
 
-            let mut histories = state.histories.write().await;
-            if let Some(history) = histories.get_mut(&sender) {
-                history.undo.push(stroke.clone());
+            if let Some(stroke) = removed {
+                state.active_ids.write().await.remove(&id);
+                state.owners.write().await.remove(&id);
+                let mut histories = state.histories.write().await;
+                if let Some(history) = histories.get_mut(&sender) {
+                    history.undo.push(Action::EraseStroke(stroke));
+                    history.redo.clear();
+                }
+                Some((vec![ServerMessage::StrokeRemove { id }], true))
+            } else {
+                None
             }
-
-            Some((ServerMessage::StrokeRestore { stroke }, true))
         }
     }
 }
@@ -327,6 +400,49 @@ async fn broadcast_all(state: &AppState, message: ServerMessage) {
         for id in stale {
             peers.remove(&id);
         }
+    }
+}
+
+async fn remove_stroke(state: &AppState, id: &str) -> bool {
+    let removed = {
+        let mut strokes = state.strokes.write().await;
+        if let Some(index) = strokes.iter().position(|s| s.id == id) {
+            strokes.remove(index);
+            true
+        } else {
+            false
+        }
+    };
+    if removed {
+        state.active_ids.write().await.remove(id);
+        state.owners.write().await.remove(id);
+    }
+    removed
+}
+
+async fn add_stroke(state: &AppState, stroke: Stroke, owner: Option<Uuid>) {
+    let removed = {
+        let mut strokes = state.strokes.write().await;
+        strokes.push(stroke.clone());
+        let overflow = strokes.len().saturating_sub(MAX_STROKES);
+        if overflow > 0 {
+            strokes.drain(0..overflow).collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        }
+    };
+
+    if !removed.is_empty() {
+        let mut active = state.active_ids.write().await;
+        let mut owners = state.owners.write().await;
+        for stroke in removed {
+            active.remove(&stroke.id);
+            owners.remove(&stroke.id);
+        }
+    }
+
+    if let Some(owner) = owner {
+        state.owners.write().await.insert(stroke.id.clone(), owner);
     }
 }
 
