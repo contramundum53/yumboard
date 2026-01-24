@@ -659,42 +659,23 @@ pub fn run() -> Result<(), JsValue> {
             let load_socket_onload = load_socket_onchange.clone();
             let load_button_onload = load_button_cb.clone();
             let onload = Closure::<dyn FnMut(ProgressEvent)>::new(move |event: ProgressEvent| {
-                let target = match event.target() {
-                    Some(target) => target,
-                    None => {
-                        let mut state = load_state_onload.borrow_mut();
-                        if let Some(previous) = take_loading_previous(&mut state) {
-                            state.mode = previous;
-                        }
-                        set_load_busy(&load_button_onload, false);
-                        return;
-                    }
-                };
-                let reader: FileReader = match target.dyn_into() {
-                    Ok(reader) => reader,
-                    Err(_) => {
-                        let mut state = load_state_onload.borrow_mut();
-                        if let Some(previous) = take_loading_previous(&mut state) {
-                            state.mode = previous;
-                        }
-                        set_load_busy(&load_button_onload, false);
-                        return;
-                    }
-                };
-                let Some(result) = reader.result().ok() else {
+                let restore = || {
                     let mut state = load_state_onload.borrow_mut();
                     if let Some(previous) = take_loading_previous(&mut state) {
                         state.mode = previous;
                     }
                     set_load_busy(&load_button_onload, false);
+                };
+                let reader = event
+                    .target()
+                    .and_then(|target| target.dyn_into::<FileReader>().ok());
+                let Some(reader) = reader else {
+                    restore();
                     return;
                 };
-                let Some(text) = result.as_string() else {
-                    let mut state = load_state_onload.borrow_mut();
-                    if let Some(previous) = take_loading_previous(&mut state) {
-                        state.mode = previous;
-                    }
-                    set_load_busy(&load_button_onload, false);
+                let text = reader.result().ok().and_then(|result| result.as_string());
+                let Some(text) = text else {
+                    restore();
                     return;
                 };
                 let strokes = parse_load_payload(&text);
