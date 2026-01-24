@@ -103,38 +103,6 @@ body {
   gap: 8px;
 }
 
-.palette-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.palette-label {
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.palette-add {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  border: 1px solid rgba(35, 45, 65, 0.25);
-  background: rgba(255, 255, 255, 0.75);
-  color: var(--ink);
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 6px 14px rgba(18, 30, 52, 0.16);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.palette-add:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 10px 20px rgba(18, 30, 52, 0.2);
-}
-
 .palette {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

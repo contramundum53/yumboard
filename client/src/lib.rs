@@ -62,7 +62,7 @@ struct Bounds {
     max_y: f64,
 }
 
-const PALETTE_LIMIT: usize = 8;
+const DEFAULT_PALETTE: [&str; 1] = ["#1f1f1f"];
 
 struct State {
     canvas: HtmlCanvasElement,
@@ -92,6 +92,7 @@ struct State {
     selected_ids: Vec<String>,
     lasso_points: Vec<Point>,
     palette: Vec<String>,
+    palette_selected: usize,
     selection_mode: SelectionMode,
     transform_center: Point,
     transform_anchor: Point,
@@ -120,7 +121,6 @@ pub fn run() -> Result<(), JsValue> {
 
     let color_input: HtmlInputElement = get_element(&document, "color")?;
     let palette_el: HtmlElement = get_element(&document, "palette")?;
-    let palette_add: HtmlButtonElement = get_element(&document, "paletteAdd")?;
     let size_input: HtmlInputElement = get_element(&document, "size")?;
     let size_value: HtmlSpanElement = get_element(&document, "sizeValue")?;
     let clear_button: HtmlButtonElement = get_element(&document, "clear")?;
@@ -166,7 +166,8 @@ pub fn run() -> Result<(), JsValue> {
         pan_y: 0.0,
         selected_ids: Vec::new(),
         lasso_points: Vec::new(),
-        palette: Vec::new(),
+        palette: DEFAULT_PALETTE.iter().map(|value| value.to_string()).collect(),
+        palette_selected: 0,
         selection_mode: SelectionMode::None,
         transform_center: Point { x: 0.0, y: 0.0 },
         transform_anchor: Point { x: 0.0, y: 0.0 },
@@ -184,8 +185,16 @@ pub fn run() -> Result<(), JsValue> {
     set_tool_button(&pan_button, false);
     set_canvas_mode(&canvas, Tool::Draw, false);
     {
-        let state = state.borrow();
-        render_palette(&document, &palette_el, &state.palette, &color_input.value());
+        let state = state.borrow_mut();
+        if let Some(color) = state.palette.get(state.palette_selected).cloned() {
+            color_input.set_value(&color);
+        }
+        render_palette(
+            &document,
+            &palette_el,
+            &state.palette,
+            state.palette_selected,
+        );
     }
 
     let ws_url = websocket_url(&window)?;
@@ -461,13 +470,23 @@ pub fn run() -> Result<(), JsValue> {
         let color_input = color_input.clone();
         let document = document.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
-            let color = match palette_color_from_event(&event) {
-                Some(color) => color,
+            let index = match palette_index_from_event(&event) {
+                Some(index) => index,
                 None => return,
             };
-            color_input.set_value(&color);
-            let state = palette_state.borrow_mut();
-            render_palette(&document, &palette_el_cb, &state.palette, &color_input.value());
+            let mut state = palette_state.borrow_mut();
+            if index >= state.palette.len() {
+                return;
+            }
+            if index == state.palette_selected {
+                color_input.click();
+                return;
+            }
+            state.palette_selected = index;
+            if let Some(color) = state.palette.get(index).cloned() {
+                color_input.set_value(&color);
+            }
+            render_palette(&document, &palette_el_cb, &state.palette, state.palette_selected);
         });
         palette_el_listener.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
@@ -477,16 +496,22 @@ pub fn run() -> Result<(), JsValue> {
         let palette_state = state.clone();
         let palette_el_cb = palette_el.clone();
         let color_input_cb = color_input.clone();
-        let palette_add_listener = palette_add.clone();
+        let color_input_listener = color_input.clone();
         let document = document.clone();
-        let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
+        let oninput = Closure::<dyn FnMut(Event)>::new(move |_| {
             let color = color_input_cb.value();
             let mut state = palette_state.borrow_mut();
-            add_color_to_palette(&mut state.palette, &color);
-            render_palette(&document, &palette_el_cb, &state.palette, &color_input_cb.value());
+            if state.palette_selected >= state.palette.len() {
+                state.palette_selected = 0;
+            }
+            let selected = state.palette_selected;
+            if let Some(entry) = state.palette.get_mut(selected) {
+                *entry = color;
+            }
+            render_palette(&document, &palette_el_cb, &state.palette, state.palette_selected);
         });
-        palette_add_listener.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
-        onclick.forget();
+        color_input_listener.add_event_listener_with_callback("input", oninput.as_ref().unchecked_ref())?;
+        oninput.forget();
     }
 
     {
@@ -1279,30 +1304,14 @@ fn decode_uri_string(text: &str) -> Option<String> {
         .and_then(|value| value.as_string())
 }
 
-fn normalize_palette_color(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_lowercase())
-    }
-}
-
-fn add_color_to_palette(palette: &mut Vec<String>, color: &str) {
-    let Some(color) = normalize_palette_color(color) else {
-        return;
-    };
-    palette.retain(|item| item != &color);
-    palette.insert(0, color);
-    if palette.len() > PALETTE_LIMIT {
-        palette.truncate(PALETTE_LIMIT);
-    }
-}
-
-fn render_palette(document: &Document, palette_el: &HtmlElement, colors: &[String], current: &str) {
+fn render_palette(
+    document: &Document,
+    palette_el: &HtmlElement,
+    colors: &[String],
+    selected: usize,
+) {
     palette_el.set_inner_html("");
-    let current = normalize_palette_color(current);
-    for color in colors {
+    for (index, color) in colors.iter().enumerate() {
         let Ok(element) = document.create_element("button") else {
             continue;
         };
@@ -1310,9 +1319,9 @@ fn render_palette(document: &Document, palette_el: &HtmlElement, colors: &[Strin
             continue;
         };
         let _ = button.set_attribute("type", "button");
-        let _ = button.set_attribute("data-color", color);
+        let _ = button.set_attribute("data-index", &index.to_string());
         let _ = button.set_attribute("aria-label", &format!("Use color {color}"));
-        let class_name = if current.as_deref() == Some(color.as_str()) {
+        let class_name = if index == selected {
             "swatch active"
         } else {
             "swatch"
@@ -1323,13 +1332,13 @@ fn render_palette(document: &Document, palette_el: &HtmlElement, colors: &[Strin
     }
 }
 
-fn palette_color_from_event(event: &Event) -> Option<String> {
+fn palette_index_from_event(event: &Event) -> Option<usize> {
     let mut current = event
         .target()
         .and_then(|target| target.dyn_into::<Element>().ok());
     while let Some(element) = current {
-        if let Some(color) = element.get_attribute("data-color") {
-            return normalize_palette_color(&color);
+        if let Some(index) = element.get_attribute("data-index") {
+            return index.parse::<usize>().ok();
         }
         current = element.parent_element().map(|parent| parent.into());
     }
