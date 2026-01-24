@@ -22,6 +22,19 @@ pub fn world_to_screen(state: &State, point: Point) -> (f64, f64) {
     (x, y)
 }
 
+fn world_to_screen_transform(
+    zoom: f64,
+    board_offset_x: f64,
+    board_offset_y: f64,
+    pan_x: f64,
+    pan_y: f64,
+    point: Point,
+) -> (f64, f64) {
+    let x = point.x as f64 * zoom + board_offset_x + pan_x;
+    let y = point.y as f64 * zoom + board_offset_y + pan_y;
+    (x, y)
+}
+
 pub fn selection_bounds(strokes: &[Stroke], select: &SelectState) -> Option<Bounds> {
     if select.selected_ids.is_empty() {
         return None;
@@ -62,21 +75,34 @@ pub fn selection_center(strokes: &[Stroke], select: &SelectState) -> Option<Poin
 }
 
 pub fn selection_hit_test(
-    state: &State,
+    strokes: &[Stroke],
     select: &SelectState,
+    zoom: f64,
+    board_offset_x: f64,
+    board_offset_y: f64,
+    pan_x: f64,
+    pan_y: f64,
     screen_x: f64,
     screen_y: f64,
 ) -> Option<SelectionHit> {
-    let bounds = selection_bounds(&state.strokes, select)?;
-    let (left, top) = world_to_screen(
-        state,
+    let bounds = selection_bounds(strokes, select)?;
+    let (left, top) = world_to_screen_transform(
+        zoom,
+        board_offset_x,
+        board_offset_y,
+        pan_x,
+        pan_y,
         Point {
             x: bounds.min_x as f32,
             y: bounds.min_y as f32,
         },
     );
-    let (right, bottom) = world_to_screen(
-        state,
+    let (right, bottom) = world_to_screen_transform(
+        zoom,
+        board_offset_x,
+        board_offset_y,
+        pan_x,
+        pan_y,
         Point {
             x: bounds.max_x as f32,
             y: bounds.max_y as f32,
