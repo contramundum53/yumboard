@@ -1,6 +1,9 @@
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{Document, Element, HtmlCanvasElement, HtmlElement, HtmlInputElement, HtmlSpanElement, PointerEvent, Window};
+use web_sys::{
+    Document, Element, HtmlCanvasElement, HtmlElement, HtmlInputElement, HtmlSpanElement,
+    PointerEvent, Window,
+};
 
 use pfboard_shared::Point;
 
@@ -57,9 +60,8 @@ pub fn resize_canvas(window: &Window, state: &mut State) {
     let _ = state.ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
     state.board_width = rect.width();
     state.board_height = rect.height();
-    state.board_scale = rect.width().min(rect.height());
-    state.board_offset_x = (rect.width() - state.board_scale) / 2.0;
-    state.board_offset_y = (rect.height() - state.board_scale) / 2.0;
+    state.board_offset_x = rect.width() / 2.0;
+    state.board_offset_y = rect.height() / 2.0;
     redraw(state);
 }
 
@@ -69,7 +71,6 @@ pub fn event_to_point(
     pan_x: f64,
     pan_y: f64,
     zoom: f64,
-    board_scale: f64,
     board_offset_x: f64,
     board_offset_y: f64,
 ) -> Option<Point> {
@@ -77,10 +78,7 @@ pub fn event_to_point(
     if rect.width() <= 0.0 || rect.height() <= 0.0 {
         return None;
     }
-    if board_scale <= 0.0 {
-        return None;
-    }
-    let scale = board_scale * zoom;
+    let scale = zoom;
     let x = (event.client_x() as f64 - rect.left() - pan_x - board_offset_x) / scale;
     let y = (event.client_y() as f64 - rect.top() - pan_y - board_offset_y) / scale;
     normalize_point(Point {

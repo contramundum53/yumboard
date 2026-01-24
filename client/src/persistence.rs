@@ -58,12 +58,7 @@ fn decode_uri_string(text: &str) -> Option<String> {
 }
 
 pub fn build_pdf_html(state: &State, include_background: bool) -> String {
-    let scale = if state.board_scale > 0.0 {
-        state.board_scale
-    } else {
-        1000.0
-    };
-    let (min_x, min_y, width, height) = pdf_bounds(state, scale);
+    let (min_x, min_y, width, height) = pdf_bounds(state);
     let mut paths = String::new();
     for stroke in &state.strokes {
         if stroke.points.is_empty() {
@@ -71,8 +66,8 @@ pub fn build_pdf_html(state: &State, include_background: bool) -> String {
         }
         let mut data = String::new();
         for (index, point) in stroke.points.iter().enumerate() {
-            let x = point.x as f64 * scale;
-            let y = point.y as f64 * scale;
+            let x = point.x as f64;
+            let y = point.y as f64;
             if index == 0 {
                 data.push_str(&format!("M {} {}", x, y));
             } else {
@@ -87,8 +82,8 @@ pub fn build_pdf_html(state: &State, include_background: bool) -> String {
         ));
         if stroke.points.len() == 1 {
             let p = stroke.points[0];
-            let cx = p.x as f64 * scale;
-            let cy = p.y as f64 * scale;
+            let cx = p.x as f64;
+            let cy = p.y as f64;
             let r = width / 2.0;
             paths.push_str(&format!(
                 "<circle cx=\"{}\" cy=\"{}\" r=\"{}\" fill=\"{}\" />",
@@ -114,7 +109,7 @@ pub fn build_pdf_html(state: &State, include_background: bool) -> String {
     )
 }
 
-fn pdf_bounds(state: &State, scale: f64) -> (f64, f64, f64, f64) {
+fn pdf_bounds(state: &State) -> (f64, f64, f64, f64) {
     let mut min_x = f64::MAX;
     let mut min_y = f64::MAX;
     let mut max_x = f64::MIN;
@@ -123,8 +118,8 @@ fn pdf_bounds(state: &State, scale: f64) -> (f64, f64, f64, f64) {
     for stroke in &state.strokes {
         max_size = max_size.max(stroke.size as f64 * STROKE_UNIT);
         for point in &stroke.points {
-            let x = point.x as f64 * scale;
-            let y = point.y as f64 * scale;
+            let x = point.x as f64;
+            let y = point.y as f64;
             min_x = min_x.min(x);
             min_y = min_y.min(y);
             max_x = max_x.max(x);
@@ -132,7 +127,7 @@ fn pdf_bounds(state: &State, scale: f64) -> (f64, f64, f64, f64) {
         }
     }
     if min_x == f64::MAX {
-        return (0.0, 0.0, scale, scale);
+        return (0.0, 0.0, 1.0, 1.0);
     }
     let pad = (max_size / 2.0).max(1.0);
     min_x -= pad;

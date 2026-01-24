@@ -36,7 +36,6 @@ pub fn start_stroke(state: &mut State, id: String, color: String, size: f32, poi
     state.active_ids.insert(id);
     draw_dot(
         &state.ctx,
-        state.board_scale,
         state.board_offset_x,
         state.board_offset_y,
         state.zoom,
@@ -70,7 +69,6 @@ pub fn move_stroke(state: &mut State, id: &str, point: Point) {
         if from == to {
             draw_dot(
                 &state.ctx,
-                state.board_scale,
                 state.board_offset_x,
                 state.board_offset_y,
                 state.zoom,
@@ -83,7 +81,6 @@ pub fn move_stroke(state: &mut State, id: &str, point: Point) {
         } else {
             draw_segment(
                 &state.ctx,
-                state.board_scale,
                 state.board_offset_x,
                 state.board_offset_y,
                 state.zoom,
@@ -135,12 +132,8 @@ pub fn restore_stroke(state: &mut State, mut stroke: Stroke) {
 }
 
 pub fn erase_hits_at_point(state: &mut State, point: Point) -> Vec<String> {
-    if state.board_scale <= 0.0 {
-        return Vec::new();
-    }
-    let scale = state.board_scale * state.zoom;
-    let px = point.x as f64 * scale + state.board_offset_x + state.pan_x;
-    let py = point.y as f64 * scale + state.board_offset_y + state.pan_y;
+    let px = point.x as f64 * state.zoom + state.board_offset_x + state.pan_x;
+    let py = point.y as f64 * state.zoom + state.board_offset_y + state.pan_y;
     let mut removed = Vec::new();
     let mut index = state.strokes.len();
 
@@ -154,7 +147,6 @@ pub fn erase_hits_at_point(state: &mut State, point: Point) -> Vec<String> {
             stroke,
             px,
             py,
-            scale,
             state.zoom,
             state.board_offset_x,
             state.board_offset_y,

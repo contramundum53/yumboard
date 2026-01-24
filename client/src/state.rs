@@ -54,7 +54,6 @@ pub struct State {
     pub load_onload: Option<Closure<dyn FnMut(ProgressEvent)>>,
     pub board_width: f64,
     pub board_height: f64,
-    pub board_scale: f64,
     pub board_offset_x: f64,
     pub board_offset_y: f64,
     pub zoom: f64,

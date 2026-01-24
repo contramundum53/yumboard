@@ -44,5 +44,6 @@ features = [
   "ProgressEvent",
   "WheelEvent",
   "WebSocket",
-  "Window"
+  "Window",
+  "console",
 ]

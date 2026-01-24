@@ -6,8 +6,8 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
     CanvasRenderingContext2d, Event, FileReader, HtmlAnchorElement, HtmlButtonElement,
-    HtmlCanvasElement, HtmlElement, HtmlInputElement, HtmlSpanElement, KeyboardEvent,
-    MessageEvent, PointerEvent, ProgressEvent, WebSocket,
+    HtmlCanvasElement, HtmlElement, HtmlInputElement, HtmlSpanElement, KeyboardEvent, MessageEvent,
+    PointerEvent, ProgressEvent, WebSocket,
 };
 
 use pfboard_shared::{ClientMessage, Point, ServerMessage};
@@ -23,13 +23,13 @@ use crate::dom::{
 };
 use crate::geometry::{
     angle_between, apply_rotation, apply_scale_xy, apply_translation, clamp_scale,
-    selection_center, selection_hit_test, selected_strokes,
+    selected_strokes, selection_center, selection_hit_test,
 };
 use crate::net::{send_message, websocket_url};
 use crate::palette::{palette_action_from_event, render_palette, PaletteAction};
 use crate::persistence::{build_pdf_html, open_print_window, parse_load_payload, SaveData};
 use crate::render::redraw;
-use crate::state::{ScaleAxis, SelectionMode, SelectionHit, State, Tool, DEFAULT_PALETTE};
+use crate::state::{ScaleAxis, SelectionHit, SelectionMode, State, Tool, DEFAULT_PALETTE};
 use crate::util::make_id;
 
 #[wasm_bindgen(start)]
@@ -79,7 +79,6 @@ pub fn run() -> Result<(), JsValue> {
         load_onload: None,
         board_width: 0.0,
         board_height: 0.0,
-        board_scale: 0.0,
         board_offset_x: 0.0,
         board_offset_y: 0.0,
         zoom: 1.0,
@@ -97,7 +96,10 @@ pub fn run() -> Result<(), JsValue> {
         pan_y: 0.0,
         selected_ids: Vec::new(),
         lasso_points: Vec::new(),
-        palette: DEFAULT_PALETTE.iter().map(|value| value.to_string()).collect(),
+        palette: DEFAULT_PALETTE
+            .iter()
+            .map(|value| value.to_string())
+            .collect(),
         palette_selected: Some(0),
         palette_last_selected: 0,
         palette_add_mode: false,
@@ -123,7 +125,12 @@ pub fn run() -> Result<(), JsValue> {
                 color_input.set_value(&color);
             }
         }
-        render_palette(&document, &palette_el, &state.palette, state.palette_selected);
+        render_palette(
+            &document,
+            &palette_el,
+            &state.palette,
+            state.palette_selected,
+        );
     }
 
     let ws_url = websocket_url(&window)?;
@@ -306,9 +313,15 @@ pub fn run() -> Result<(), JsValue> {
             set_tool_button(&eraser_button_cb, state.tool == Tool::Erase);
             set_tool_button(&lasso_button_cb, state.tool == Tool::Select);
             set_canvas_mode(&state.canvas, state.tool, false);
-            render_palette(&document, &palette_el_cb, &state.palette, state.palette_selected);
+            render_palette(
+                &document,
+                &palette_el_cb,
+                &state.palette,
+                state.palette_selected,
+            );
         });
-        eraser_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
+        eraser_button
+            .add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
     }
 
@@ -336,7 +349,12 @@ pub fn run() -> Result<(), JsValue> {
             set_tool_button(&pan_button_cb, state.tool == Tool::Pan);
             set_tool_button(&lasso_button_cb, state.tool == Tool::Select);
             set_canvas_mode(&state.canvas, state.tool, false);
-            render_palette(&document, &palette_el_cb, &state.palette, state.palette_selected);
+            render_palette(
+                &document,
+                &palette_el_cb,
+                &state.palette,
+                state.palette_selected,
+            );
         });
         lasso_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
@@ -387,7 +405,12 @@ pub fn run() -> Result<(), JsValue> {
             set_tool_button(&pan_button_cb, state.tool == Tool::Pan);
             set_tool_button(&lasso_button_cb, state.tool == Tool::Select);
             set_canvas_mode(&state.canvas, state.tool, false);
-            render_palette(&document, &palette_el_cb, &state.palette, state.palette_selected);
+            render_palette(
+                &document,
+                &palette_el_cb,
+                &state.palette,
+                state.palette_selected,
+            );
         });
         pan_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
@@ -424,7 +447,12 @@ pub fn run() -> Result<(), JsValue> {
             match action {
                 PaletteAction::Add => {
                     state.palette_add_mode = true;
-                    render_palette(&document, &palette_el_cb, &state.palette, state.palette_selected);
+                    render_palette(
+                        &document,
+                        &palette_el_cb,
+                        &state.palette,
+                        state.palette_selected,
+                    );
                     color_input.click();
                 }
                 PaletteAction::Select(index) => {
@@ -453,7 +481,8 @@ pub fn run() -> Result<(), JsValue> {
                 }
             }
         });
-        palette_el_listener.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
+        palette_el_listener
+            .add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
     }
 
@@ -474,7 +503,9 @@ pub fn run() -> Result<(), JsValue> {
                 }
                 state.palette_add_mode = false;
             } else {
-                let mut selected = state.palette_selected.unwrap_or(state.palette_last_selected);
+                let mut selected = state
+                    .palette_selected
+                    .unwrap_or(state.palette_last_selected);
                 if state.palette.is_empty() {
                     state.palette_selected = None;
                 } else {
@@ -488,9 +519,15 @@ pub fn run() -> Result<(), JsValue> {
                     }
                 }
             }
-            render_palette(&document, &palette_el_cb, &state.palette, state.palette_selected);
+            render_palette(
+                &document,
+                &palette_el_cb,
+                &state.palette,
+                state.palette_selected,
+            );
         });
-        color_input_listener.add_event_listener_with_callback("input", oninput.as_ref().unchecked_ref())?;
+        color_input_listener
+            .add_event_listener_with_callback("input", oninput.as_ref().unchecked_ref())?;
         oninput.forget();
     }
 
@@ -523,10 +560,8 @@ pub fn run() -> Result<(), JsValue> {
                 let _ = save_button_cb.set_attribute("aria-expanded", "true");
             }
         });
-        save_button_listener.add_event_listener_with_callback(
-            "click",
-            onclick.as_ref().unchecked_ref(),
-        )?;
+        save_button_listener
+            .add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
     }
 
@@ -556,7 +591,8 @@ pub fn run() -> Result<(), JsValue> {
             let _ = save_menu.set_attribute("hidden", "");
             let _ = save_button.set_attribute("aria-expanded", "false");
         });
-        save_json_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
+        save_json_button
+            .add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
     }
 
@@ -571,7 +607,8 @@ pub fn run() -> Result<(), JsValue> {
             let _ = save_menu.set_attribute("hidden", "");
             let _ = save_button.set_attribute("aria-expanded", "false");
         });
-        save_pdf_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
+        save_pdf_button
+            .add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
     }
 
@@ -655,10 +692,7 @@ pub fn run() -> Result<(), JsValue> {
                 reader.set_onload(Some(handler.as_ref().unchecked_ref()));
             }
             let _ = reader.read_as_text(&file);
-            load_state_onchange
-                .borrow_mut()
-                .load_reader
-                .replace(reader);
+            load_state_onchange.borrow_mut().load_reader.replace(reader);
         });
         load_file.add_event_listener_with_callback("change", onchange.as_ref().unchecked_ref())?;
         onchange.forget();
@@ -680,13 +714,12 @@ pub fn run() -> Result<(), JsValue> {
                 let rect = down_canvas.get_bounding_client_rect();
                 let screen_x = event.client_x() as f64 - rect.left();
                 let screen_y = event.client_y() as f64 - rect.top();
-                let (pan_x, pan_y, zoom, board_scale, offset_x, offset_y) = {
+                let (pan_x, pan_y, zoom, offset_x, offset_y) = {
                     let state = down_state.borrow();
                     (
                         state.pan_x,
                         state.pan_y,
                         state.zoom,
-                        state.board_scale,
                         state.board_offset_x,
                         state.board_offset_y,
                     )
@@ -697,7 +730,6 @@ pub fn run() -> Result<(), JsValue> {
                     pan_x,
                     pan_y,
                     zoom,
-                    board_scale,
                     offset_x,
                     offset_y,
                 ) {
@@ -785,13 +817,12 @@ pub fn run() -> Result<(), JsValue> {
                 let _ = down_canvas.set_pointer_capture(event.pointer_id());
                 return;
             }
-            let (pan_x, pan_y, zoom, board_scale, offset_x, offset_y) = {
+            let (pan_x, pan_y, zoom, offset_x, offset_y) = {
                 let state = down_state.borrow();
                 (
                     state.pan_x,
                     state.pan_y,
                     state.zoom,
-                    state.board_scale,
                     state.board_offset_x,
                     state.board_offset_y,
                 )
@@ -802,7 +833,6 @@ pub fn run() -> Result<(), JsValue> {
                 pan_x,
                 pan_y,
                 zoom,
-                board_scale,
                 offset_x,
                 offset_y,
             ) {
@@ -858,13 +888,12 @@ pub fn run() -> Result<(), JsValue> {
                 let rect = move_canvas.get_bounding_client_rect();
                 let screen_x = event.client_x() as f64 - rect.left();
                 let screen_y = event.client_y() as f64 - rect.top();
-                let (pan_x, pan_y, zoom, board_scale, offset_x, offset_y) = {
+                let (pan_x, pan_y, zoom, offset_x, offset_y) = {
                     let state = move_state.borrow();
                     (
                         state.pan_x,
                         state.pan_y,
                         state.zoom,
-                        state.board_scale,
                         state.board_offset_x,
                         state.board_offset_y,
                     )
@@ -875,7 +904,6 @@ pub fn run() -> Result<(), JsValue> {
                     pan_x,
                     pan_y,
                     zoom,
-                    board_scale,
                     offset_x,
                     offset_y,
                 ) {
@@ -895,10 +923,7 @@ pub fn run() -> Result<(), JsValue> {
                             apply_translation(&state.transform_snapshot, delta_x, delta_y);
                         apply_transformed_strokes(&mut state, &updated);
                         for stroke in updated {
-                            send_message(
-                                &move_socket,
-                                &ClientMessage::StrokeReplace { stroke },
-                            );
+                            send_message(&move_socket, &ClientMessage::StrokeReplace { stroke });
                         }
                     }
                     SelectionMode::Scale => {
@@ -926,12 +951,7 @@ pub fn run() -> Result<(), JsValue> {
                         }
                         sx = clamp_scale(sx, 0.05);
                         sy = clamp_scale(sy, 0.05);
-                        let updated = apply_scale_xy(
-                            &state.transform_snapshot,
-                            anchor,
-                            sx,
-                            sy,
-                        );
+                        let updated = apply_scale_xy(&state.transform_snapshot, anchor, sx, sy);
                         apply_transformed_strokes(&mut state, &updated);
                         for stroke in updated {
                             send_message(&move_socket, &ClientMessage::StrokeReplace { stroke });
@@ -947,10 +967,7 @@ pub fn run() -> Result<(), JsValue> {
                         );
                         apply_transformed_strokes(&mut state, &updated);
                         for stroke in updated {
-                            send_message(
-                                &move_socket,
-                                &ClientMessage::StrokeReplace { stroke },
-                            );
+                            send_message(&move_socket, &ClientMessage::StrokeReplace { stroke });
                         }
                     }
                     SelectionMode::None => {
@@ -962,13 +979,12 @@ pub fn run() -> Result<(), JsValue> {
                 return;
             }
             if tool == Tool::Erase {
-                let (pan_x, pan_y, zoom, board_scale, offset_x, offset_y) = {
+                let (pan_x, pan_y, zoom, offset_x, offset_y) = {
                     let state = move_state.borrow();
                     (
                         state.pan_x,
                         state.pan_y,
                         state.zoom,
-                        state.board_scale,
                         state.board_offset_x,
                         state.board_offset_y,
                     )
@@ -979,7 +995,6 @@ pub fn run() -> Result<(), JsValue> {
                     pan_x,
                     pan_y,
                     zoom,
-                    board_scale,
                     offset_x,
                     offset_y,
                 ) {
@@ -1023,13 +1038,12 @@ pub fn run() -> Result<(), JsValue> {
                 }
                 return;
             }
-            let (pan_x, pan_y, zoom, board_scale, offset_x, offset_y) = {
+            let (pan_x, pan_y, zoom, offset_x, offset_y) = {
                 let state = move_state.borrow();
                 (
                     state.pan_x,
                     state.pan_y,
                     state.zoom,
-                    state.board_scale,
                     state.board_offset_x,
                     state.board_offset_y,
                 )
@@ -1049,7 +1063,6 @@ pub fn run() -> Result<(), JsValue> {
                     pan_x,
                     pan_y,
                     zoom,
-                    board_scale,
                     offset_x,
                     offset_y,
                 ) {
@@ -1185,30 +1198,28 @@ pub fn run() -> Result<(), JsValue> {
             };
             wheel_event.prevent_default();
             let rect = zoom_canvas.get_bounding_client_rect();
-            let (offset_x, offset_y, board_scale, zoom, pan_x, pan_y) = {
+            let (offset_x, offset_y, zoom, pan_x, pan_y) = {
                 let state = zoom_state.borrow();
                 (
                     state.board_offset_x,
                     state.board_offset_y,
-                    state.board_scale,
                     state.zoom,
                     state.pan_x,
                     state.pan_y,
                 )
             };
-            if board_scale <= 0.0 {
-                return;
-            }
-            let scale = board_scale * zoom;
             let cursor_x = wheel_event.client_x() as f64 - rect.left();
             let cursor_y = wheel_event.client_y() as f64 - rect.top();
-            let world_x = (cursor_x - pan_x - offset_x) / scale;
-            let world_y = (cursor_y - pan_y - offset_y) / scale;
-            let zoom_factor = if wheel_event.delta_y() < 0.0 { 1.1 } else { 0.9 };
+            let world_x = (cursor_x - pan_x - offset_x) / zoom;
+            let world_y = (cursor_y - pan_y - offset_y) / zoom;
+            let zoom_factor = if wheel_event.delta_y() < 0.0 {
+                1.1
+            } else {
+                0.9
+            };
             let next_zoom = (zoom * zoom_factor).clamp(0.4, 4.0);
-            let next_scale = board_scale * next_zoom;
-            let next_pan_x = cursor_x - offset_x - world_x * next_scale;
-            let next_pan_y = cursor_y - offset_y - world_y * next_scale;
+            let next_pan_x = cursor_x - offset_x - world_x * next_zoom;
+            let next_pan_y = cursor_y - offset_y - world_y * next_zoom;
             {
                 let mut state = zoom_state.borrow_mut();
                 state.zoom = next_zoom;

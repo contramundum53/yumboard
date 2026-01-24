@@ -17,9 +17,8 @@ pub fn normalize_point(point: Point) -> Option<Point> {
 }
 
 pub fn world_to_screen(state: &State, point: Point) -> (f64, f64) {
-    let scale = state.board_scale * state.zoom;
-    let x = point.x as f64 * scale + state.board_offset_x + state.pan_x;
-    let y = point.y as f64 * scale + state.board_offset_y + state.pan_y;
+    let x = point.x as f64 * state.zoom + state.board_offset_x + state.pan_x;
+    let y = point.y as f64 * state.zoom + state.board_offset_y + state.pan_y;
     (x, y)
 }
 
@@ -311,7 +310,6 @@ pub fn stroke_hit(
     stroke: &Stroke,
     px: f64,
     py: f64,
-    scale: f64,
     zoom: f64,
     offset_x: f64,
     offset_y: f64,
@@ -324,8 +322,8 @@ pub fn stroke_hit(
     let threshold = (stroke.size as f64 * zoom * STROKE_UNIT / 2.0).max(6.0);
     if stroke.points.len() == 1 {
         let point = stroke.points[0];
-        let dx = point.x as f64 * scale + offset_x + pan_x - px;
-        let dy = point.y as f64 * scale + offset_y + pan_y - py;
+        let dx = point.x as f64 * zoom + offset_x + pan_x - px;
+        let dy = point.y as f64 * zoom + offset_y + pan_y - py;
         return dx * dx + dy * dy <= threshold * threshold;
     }
     for window in stroke.points.windows(2) {
@@ -334,10 +332,10 @@ pub fn stroke_hit(
         let distance = distance_to_segment(
             px,
             py,
-            start.x as f64 * scale + offset_x + pan_x,
-            start.y as f64 * scale + offset_y + pan_y,
-            end.x as f64 * scale + offset_x + pan_x,
-            end.y as f64 * scale + offset_y + pan_y,
+            start.x as f64 * zoom + offset_x + pan_x,
+            start.y as f64 * zoom + offset_y + pan_y,
+            end.x as f64 * zoom + offset_x + pan_x,
+            end.y as f64 * zoom + offset_y + pan_y,
         );
         if distance <= threshold {
             return true;
