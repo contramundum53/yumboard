@@ -39,13 +39,15 @@
       <span class="icon-mask" style="--icon-url: url('/icon/pan.svg');"></span>
     </button>
 
-    <button id="save" class="button-base tool" type="button" aria-label="Save">
-      <span class="icon-mask" style="--icon-url: url('/icon/save.svg');"></span>
-    </button>
-
-    <button id="savePdf" class="button-base tool" type="button">
-      Save PDF
-    </button>
+    <div class="save-menu">
+      <button id="save" class="button-base tool" type="button" aria-label="Save" aria-haspopup="true" aria-expanded="false">
+        <span class="icon-mask" style="--icon-url: url('/icon/save.svg');"></span>
+      </button>
+      <div id="saveMenu" class="menu" hidden>
+        <button id="saveJson" class="button-base menu-item" type="button">Save JSON</button>
+        <button id="savePdf" class="button-base menu-item" type="button">Save PDF</button>
+      </div>
+    </div>
 
     <button id="load" class="button-base tool" type="button" aria-label="Load">
       <span class="icon-mask" style="--icon-url: url('/icon/load.svg');"></span>

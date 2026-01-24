@@ -55,6 +55,8 @@ pub fn run() -> Result<(), JsValue> {
     let size_value: HtmlSpanElement = get_element(&document, "sizeValue")?;
     let clear_button: HtmlButtonElement = get_element(&document, "clear")?;
     let save_button: HtmlButtonElement = get_element(&document, "save")?;
+    let save_menu: HtmlElement = get_element(&document, "saveMenu")?;
+    let save_json_button: HtmlButtonElement = get_element(&document, "saveJson")?;
     let save_pdf_button: HtmlButtonElement = get_element(&document, "savePdf")?;
     let load_button: HtmlButtonElement = get_element(&document, "load")?;
     let load_file: HtmlInputElement = get_element(&document, "loadFile")?;
@@ -507,8 +509,32 @@ pub fn run() -> Result<(), JsValue> {
     }
 
     {
+        let save_menu = save_menu.clone();
+        let save_button_cb = save_button.clone();
+        let save_button_listener = save_button.clone();
+        let onclick = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
+            event.stop_propagation();
+            let is_open = !save_menu.has_attribute("hidden");
+            if is_open {
+                let _ = save_menu.set_attribute("hidden", "");
+                let _ = save_button_cb.set_attribute("aria-expanded", "false");
+            } else {
+                let _ = save_menu.remove_attribute("hidden");
+                let _ = save_button_cb.set_attribute("aria-expanded", "true");
+            }
+        });
+        save_button_listener.add_event_listener_with_callback(
+            "click",
+            onclick.as_ref().unchecked_ref(),
+        )?;
+        onclick.forget();
+    }
+
+    {
         let save_state = state.clone();
         let document = document.clone();
+        let save_menu = save_menu.clone();
+        let save_button = save_button.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let strokes = { save_state.borrow().strokes.clone() };
             let payload = SaveData {
@@ -527,19 +553,49 @@ pub fn run() -> Result<(), JsValue> {
                     anchor.click();
                 }
             }
+            let _ = save_menu.set_attribute("hidden", "");
+            let _ = save_button.set_attribute("aria-expanded", "false");
         });
-        save_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
+        save_json_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
     }
 
     {
         let save_state = state.clone();
         let document = document.clone();
+        let save_menu = save_menu.clone();
+        let save_button = save_button.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let html = build_pdf_html(&save_state.borrow(), false);
             open_print_window(&document, &html);
+            let _ = save_menu.set_attribute("hidden", "");
+            let _ = save_button.set_attribute("aria-expanded", "false");
         });
         save_pdf_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
+        onclick.forget();
+    }
+
+    {
+        let save_menu = save_menu.clone();
+        let save_button = save_button.clone();
+        let document = document.clone();
+        let onclick = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
+            let target: web_sys::EventTarget = match event.target() {
+                Some(target) => target,
+                None => return,
+            };
+            let Some(target) = target.dyn_into::<web_sys::Node>().ok() else {
+                return;
+            };
+            let menu_node: web_sys::Node = save_menu.clone().into();
+            let button_node: web_sys::Node = save_button.clone().into();
+            if menu_node.contains(Some(&target)) || button_node.contains(Some(&target)) {
+                return;
+            }
+            let _ = save_menu.set_attribute("hidden", "");
+            let _ = save_button.set_attribute("aria-expanded", "false");
+        });
+        document.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
     }
 
