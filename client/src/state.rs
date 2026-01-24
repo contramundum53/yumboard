@@ -6,6 +6,7 @@ use web_sys::{CanvasRenderingContext2d, FileReader, HtmlCanvasElement, ProgressE
 use pfboard_shared::{Point, Stroke};
 
 pub const DEFAULT_PALETTE: [&str; 1] = ["#1f1f1f"];
+pub const STROKE_UNIT: f64 = 1.0;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Tool {

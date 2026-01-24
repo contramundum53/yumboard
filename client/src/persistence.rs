@@ -4,7 +4,7 @@ use web_sys::{Document, Event, HtmlIFrameElement};
 
 use pfboard_shared::Stroke;
 
-use crate::state::State;
+use crate::state::{State, STROKE_UNIT};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct SaveData {
@@ -80,7 +80,7 @@ pub fn build_pdf_html(state: &State, include_background: bool) -> String {
             }
         }
         let color = stroke.color.clone();
-        let width = stroke.size;
+        let width = stroke.size as f64 * STROKE_UNIT;
         paths.push_str(&format!(
             "<path d=\"{}\" stroke=\"{}\" stroke-width=\"{}\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\" />",
             data, color, width
@@ -89,7 +89,7 @@ pub fn build_pdf_html(state: &State, include_background: bool) -> String {
             let p = stroke.points[0];
             let cx = p.x as f64 * scale;
             let cy = p.y as f64 * scale;
-            let r = stroke.size as f64 / 2.0;
+            let r = width / 2.0;
             paths.push_str(&format!(
                 "<circle cx=\"{}\" cy=\"{}\" r=\"{}\" fill=\"{}\" />",
                 cx, cy, r, color
@@ -121,7 +121,7 @@ fn pdf_bounds(state: &State, scale: f64) -> (f64, f64, f64, f64) {
     let mut max_y = f64::MIN;
     let mut max_size: f64 = 0.0;
     for stroke in &state.strokes {
-        max_size = max_size.max(stroke.size as f64);
+        max_size = max_size.max(stroke.size as f64 * STROKE_UNIT);
         for point in &stroke.points {
             let x = point.x as f64 * scale;
             let y = point.y as f64 * scale;

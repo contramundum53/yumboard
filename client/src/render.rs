@@ -3,7 +3,7 @@ use web_sys::CanvasRenderingContext2d;
 use pfboard_shared::{Point, Stroke};
 
 use crate::geometry::{selection_bounds, world_to_screen};
-use crate::state::State;
+use crate::state::{State, STROKE_UNIT};
 
 pub fn draw_dot(
     ctx: &CanvasRenderingContext2d,
@@ -18,7 +18,7 @@ pub fn draw_dot(
     size: f32,
 ) {
     let scale = board_scale * zoom;
-    let weight = size as f64 * zoom;
+    let weight = size as f64 * zoom * STROKE_UNIT;
     let x = point.x as f64 * scale + board_offset_x + pan_x;
     let y = point.y as f64 * scale + board_offset_y + pan_y;
     ctx.set_fill_style_str(color);
@@ -41,7 +41,7 @@ pub fn draw_segment(
     size: f32,
 ) {
     let scale = board_scale * zoom;
-    let weight = size as f64 * zoom;
+    let weight = size as f64 * zoom * STROKE_UNIT;
     let from_x = from.x as f64 * scale + board_offset_x + pan_x;
     let from_y = from.y as f64 * scale + board_offset_y + pan_y;
     let to_x = to.x as f64 * scale + board_offset_x + pan_x;

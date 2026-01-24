@@ -1,6 +1,6 @@
 use pfboard_shared::{Point, Stroke};
 
-use crate::state::{ScaleAxis, ScaleHandle, SelectionHit, State};
+use crate::state::{ScaleAxis, ScaleHandle, SelectionHit, State, STROKE_UNIT};
 
 pub struct Bounds {
     pub min_x: f64,
@@ -321,7 +321,7 @@ pub fn stroke_hit(
     if stroke.points.is_empty() {
         return false;
     }
-    let threshold = (stroke.size as f64 * zoom / 2.0).max(6.0);
+    let threshold = (stroke.size as f64 * zoom * STROKE_UNIT / 2.0).max(6.0);
     if stroke.points.len() == 1 {
         let point = stroke.points[0];
         let dx = point.x as f64 * scale + offset_x + pan_x - px;
