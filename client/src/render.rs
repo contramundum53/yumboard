@@ -48,7 +48,6 @@ pub fn draw_segment(
     ctx.set_line_cap("round");
     ctx.set_line_join("round");
     ctx.set_line_width(weight);
-    web_sys::console::log_1(&format!("weight {}", weight).into());
     ctx.begin_path();
     ctx.move_to(from_x, from_y);
     ctx.line_to(to_x, to_y);
