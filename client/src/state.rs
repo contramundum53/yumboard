@@ -16,15 +16,6 @@ pub enum Tool {
     Select,
 }
 
-#[derive(Clone, Copy, PartialEq)]
-pub enum SelectionMode {
-    None,
-    Lasso,
-    Move,
-    Scale,
-    Rotate,
-}
-
 pub enum SelectionHit {
     Move,
     Scale(ScaleHandle),
@@ -45,6 +36,50 @@ pub struct ScaleHandle {
     pub anchor: Point,
 }
 
+pub enum DrawMode {
+    Idle,
+    Drawing { id: String },
+}
+
+pub enum EraseMode {
+    Idle,
+    Active { hits: HashSet<String> },
+}
+
+pub enum PanMode {
+    Idle,
+    Active {
+        start_x: f64,
+        start_y: f64,
+        origin_x: f64,
+        origin_y: f64,
+    },
+}
+
+pub enum SelectMode {
+    Idle,
+    Lasso { points: Vec<Point> },
+    Move { start: Point, snapshot: Vec<Stroke> },
+    Scale {
+        anchor: Point,
+        start: Point,
+        axis: ScaleAxis,
+        snapshot: Vec<Stroke>,
+    },
+    Rotate {
+        center: Point,
+        start_angle: f64,
+        snapshot: Vec<Stroke>,
+    },
+}
+
+pub enum Mode {
+    Draw(DrawMode),
+    Erase(EraseMode),
+    Pan(PanMode),
+    Select(SelectMode),
+}
+
 pub struct State {
     pub canvas: HtmlCanvasElement,
     pub ctx: CanvasRenderingContext2d,
@@ -57,29 +92,36 @@ pub struct State {
     pub board_offset_x: f64,
     pub board_offset_y: f64,
     pub zoom: f64,
-    pub current_id: Option<String>,
-    pub drawing: bool,
-    pub erasing: bool,
-    pub tool: Tool,
-    pub erase_hits: HashSet<String>,
-    pub panning: bool,
-    pub pan_start_x: f64,
-    pub pan_start_y: f64,
-    pub pan_origin_x: f64,
-    pub pan_origin_y: f64,
     pub pan_x: f64,
     pub pan_y: f64,
     pub selected_ids: Vec<String>,
-    pub lasso_points: Vec<Point>,
     pub palette: Vec<String>,
     pub palette_selected: Option<usize>,
     pub palette_last_selected: usize,
     pub palette_add_mode: bool,
-    pub selection_mode: SelectionMode,
-    pub transform_center: Point,
-    pub transform_anchor: Point,
-    pub transform_start: Point,
-    pub transform_start_angle: f64,
-    pub transform_snapshot: Vec<Stroke>,
-    pub transform_scale_axis: ScaleAxis,
+    pub mode: Mode,
+}
+
+impl Mode {
+    pub fn tool(&self) -> Tool {
+        match self {
+            Mode::Draw(_) => Tool::Draw,
+            Mode::Erase(_) => Tool::Erase,
+            Mode::Pan(_) => Tool::Pan,
+            Mode::Select(_) => Tool::Select,
+        }
+    }
+}
+
+impl State {
+    pub fn tool(&self) -> Tool {
+        self.mode.tool()
+    }
+
+    pub fn lasso_points(&self) -> &[Point] {
+        match &self.mode {
+            Mode::Select(SelectMode::Lasso { points }) => points,
+            _ => &[],
+        }
+    }
 }

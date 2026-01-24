@@ -99,7 +99,7 @@ pub fn redraw(state: &mut State) {
 }
 
 pub fn draw_selection_overlay(state: &mut State) {
-    if state.selected_ids.is_empty() && state.lasso_points.is_empty() {
+    if state.selected_ids.is_empty() && state.lasso_points().is_empty() {
         return;
     }
     let ctx = &state.ctx;
@@ -108,11 +108,11 @@ pub fn draw_selection_overlay(state: &mut State) {
     ctx.set_stroke_style_str("rgba(26, 31, 42, 0.65)");
     ctx.set_fill_style_str("rgba(26, 31, 42, 0.08)");
 
-    if !state.lasso_points.is_empty() {
+    if !state.lasso_points().is_empty() {
         let mut first = true;
         ctx.begin_path();
         let _ = ctx.set_line_dash(&js_sys::Array::of2(&4.into(), &6.into()));
-        for point in &state.lasso_points {
+        for point in state.lasso_points() {
             let (x, y) = world_to_screen(state, *point);
             if first {
                 ctx.move_to(x, y);

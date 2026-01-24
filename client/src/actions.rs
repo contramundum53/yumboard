@@ -2,7 +2,7 @@ use pfboard_shared::{Point, Stroke};
 
 use crate::geometry::{normalize_point, stroke_hit};
 use crate::render::{draw_dot, draw_segment, redraw};
-use crate::state::{SelectionMode, State};
+use crate::state::{EraseMode, Mode, SelectMode, State};
 
 pub fn sanitize_color(mut color: String) -> String {
     if color.is_empty() {
@@ -103,8 +103,9 @@ pub fn clear_board(state: &mut State) {
     state.strokes.clear();
     state.active_ids.clear();
     state.selected_ids.clear();
-    state.lasso_points.clear();
-    state.selection_mode = SelectionMode::None;
+    if matches!(&state.mode, Mode::Select(_)) {
+        state.mode = Mode::Select(SelectMode::Idle);
+    }
     redraw(state);
 }
 
@@ -132,6 +133,10 @@ pub fn restore_stroke(state: &mut State, mut stroke: Stroke) {
 }
 
 pub fn erase_hits_at_point(state: &mut State, point: Point) -> Vec<String> {
+    let hits = match &mut state.mode {
+        Mode::Erase(EraseMode::Active { hits }) => hits,
+        _ => return Vec::new(),
+    };
     let px = point.x as f64 * state.zoom + state.board_offset_x + state.pan_x;
     let py = point.y as f64 * state.zoom + state.board_offset_y + state.pan_y;
     let mut removed = Vec::new();
@@ -140,7 +145,7 @@ pub fn erase_hits_at_point(state: &mut State, point: Point) -> Vec<String> {
     while index > 0 {
         index -= 1;
         let stroke = &state.strokes[index];
-        if state.erase_hits.contains(&stroke.id) {
+        if hits.contains(&stroke.id) {
             continue;
         }
         if stroke_hit(
@@ -156,7 +161,7 @@ pub fn erase_hits_at_point(state: &mut State, point: Point) -> Vec<String> {
             let id = stroke.id.clone();
             state.strokes.remove(index);
             state.active_ids.remove(&id);
-            state.erase_hits.insert(id.clone());
+            hits.insert(id.clone());
             removed.push(id);
         }
     }
@@ -181,8 +186,9 @@ pub fn adopt_strokes(state: &mut State, strokes: Vec<Stroke>) {
     state.strokes = sanitized;
     state.active_ids.clear();
     state.selected_ids.clear();
-    state.lasso_points.clear();
-    state.selection_mode = SelectionMode::None;
+    if matches!(&state.mode, Mode::Select(_)) {
+        state.mode = Mode::Select(SelectMode::Idle);
+    }
     redraw(state);
 }
 
@@ -201,11 +207,15 @@ pub fn last_point_for_id(strokes: &[Stroke], id: &str) -> Option<Point> {
 }
 
 pub fn finalize_lasso_selection(state: &mut State) {
-    if state.lasso_points.len() < 3 {
-        state.lasso_points.clear();
+    let points = match &mut state.mode {
+        Mode::Select(SelectMode::Lasso { points }) => points,
+        _ => return,
+    };
+    if points.len() < 3 {
+        points.clear();
         return;
     }
-    let polygon = state.lasso_points.clone();
+    let polygon = points.clone();
     let mut selected = Vec::new();
     for stroke in &state.strokes {
         let mut inside = false;

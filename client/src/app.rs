@@ -10,7 +10,7 @@ use web_sys::{
     PointerEvent, ProgressEvent, WebSocket,
 };
 
-use pfboard_shared::{ClientMessage, Point, ServerMessage};
+use pfboard_shared::{ClientMessage, ServerMessage};
 
 use crate::actions::{
     adopt_strokes, apply_transformed_strokes, clear_board, end_stroke, erase_hits_at_point,
@@ -29,7 +29,10 @@ use crate::net::{send_message, websocket_url};
 use crate::palette::{palette_action_from_event, render_palette, PaletteAction};
 use crate::persistence::{build_pdf_html, open_print_window, parse_load_payload, SaveData};
 use crate::render::redraw;
-use crate::state::{ScaleAxis, SelectionHit, SelectionMode, State, Tool, DEFAULT_PALETTE};
+use crate::state::{
+    DrawMode, EraseMode, Mode, PanMode, ScaleAxis, SelectMode, SelectionHit, State, Tool,
+    DEFAULT_PALETTE,
+};
 use crate::util::make_id;
 
 #[wasm_bindgen(start)]
@@ -82,20 +85,9 @@ pub fn run() -> Result<(), JsValue> {
         board_offset_x: 0.0,
         board_offset_y: 0.0,
         zoom: 1.0,
-        current_id: None,
-        drawing: false,
-        erasing: false,
-        tool: Tool::Draw,
-        erase_hits: HashSet::new(),
-        panning: false,
-        pan_start_x: 0.0,
-        pan_start_y: 0.0,
-        pan_origin_x: 0.0,
-        pan_origin_y: 0.0,
         pan_x: 0.0,
         pan_y: 0.0,
         selected_ids: Vec::new(),
-        lasso_points: Vec::new(),
         palette: DEFAULT_PALETTE
             .iter()
             .map(|value| value.to_string())
@@ -103,13 +95,7 @@ pub fn run() -> Result<(), JsValue> {
         palette_selected: Some(0),
         palette_last_selected: 0,
         palette_add_mode: false,
-        selection_mode: SelectionMode::None,
-        transform_center: Point { x: 0.0, y: 0.0 },
-        transform_anchor: Point { x: 0.0, y: 0.0 },
-        transform_start: Point { x: 0.0, y: 0.0 },
-        transform_start_angle: 0.0,
-        transform_snapshot: Vec::new(),
-        transform_scale_axis: ScaleAxis::Both,
+        mode: Mode::Draw(DrawMode::Idle),
     }));
 
     update_size_label(&size_input, &size_value);
@@ -246,7 +232,9 @@ pub fn run() -> Result<(), JsValue> {
                             remove_stroke(&mut state, id);
                         }
                         state.selected_ids.clear();
-                        state.selection_mode = SelectionMode::None;
+                        if matches!(&state.mode, Mode::Select(_)) {
+                            state.mode = Mode::Select(SelectMode::Idle);
+                        }
                         redraw(&mut state);
                         ids
                     };
@@ -298,21 +286,15 @@ pub fn run() -> Result<(), JsValue> {
         let document = document.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = tool_state.borrow_mut();
-            state.tool = Tool::Erase;
-            state.drawing = false;
-            state.current_id = None;
-            state.erasing = false;
-            state.panning = false;
-            state.erase_hits.clear();
-            state.lasso_points.clear();
+            state.mode = Mode::Erase(EraseMode::Idle);
             state.selected_ids.clear();
-            state.selection_mode = SelectionMode::None;
             state.palette_selected = None;
             state.palette_add_mode = false;
-            set_tool_button(&pan_button_cb, state.tool == Tool::Pan);
-            set_tool_button(&eraser_button_cb, state.tool == Tool::Erase);
-            set_tool_button(&lasso_button_cb, state.tool == Tool::Select);
-            set_canvas_mode(&state.canvas, state.tool, false);
+            let tool = state.tool();
+            set_tool_button(&pan_button_cb, tool == Tool::Pan);
+            set_tool_button(&eraser_button_cb, tool == Tool::Erase);
+            set_tool_button(&lasso_button_cb, tool == Tool::Select);
+            set_canvas_mode(&state.canvas, tool, false);
             render_palette(
                 &document,
                 &palette_el_cb,
@@ -334,21 +316,15 @@ pub fn run() -> Result<(), JsValue> {
         let document = document.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = tool_state.borrow_mut();
-            state.tool = Tool::Select;
-            state.drawing = false;
-            state.current_id = None;
-            state.erasing = false;
-            state.panning = false;
-            state.erase_hits.clear();
-            state.lasso_points.clear();
+            state.mode = Mode::Select(SelectMode::Idle);
             state.selected_ids.clear();
-            state.selection_mode = SelectionMode::None;
             state.palette_selected = None;
             state.palette_add_mode = false;
-            set_tool_button(&eraser_button_cb, state.tool == Tool::Erase);
-            set_tool_button(&pan_button_cb, state.tool == Tool::Pan);
-            set_tool_button(&lasso_button_cb, state.tool == Tool::Select);
-            set_canvas_mode(&state.canvas, state.tool, false);
+            let tool = state.tool();
+            set_tool_button(&eraser_button_cb, tool == Tool::Erase);
+            set_tool_button(&pan_button_cb, tool == Tool::Pan);
+            set_tool_button(&lasso_button_cb, tool == Tool::Select);
+            set_canvas_mode(&state.canvas, tool, false);
             render_palette(
                 &document,
                 &palette_el_cb,
@@ -370,21 +346,19 @@ pub fn run() -> Result<(), JsValue> {
         let document = document.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = tool_state.borrow_mut();
-            let next_tool = if state.tool == Tool::Pan {
+            let next_tool = if state.tool() == Tool::Pan {
                 Tool::Draw
             } else {
                 Tool::Pan
             };
-            state.tool = next_tool;
-            state.drawing = false;
-            state.current_id = None;
-            state.erasing = false;
-            state.panning = false;
-            state.erase_hits.clear();
-            state.lasso_points.clear();
+            state.mode = match next_tool {
+                Tool::Draw => Mode::Draw(DrawMode::Idle),
+                Tool::Pan => Mode::Pan(PanMode::Idle),
+                Tool::Erase => Mode::Erase(EraseMode::Idle),
+                Tool::Select => Mode::Select(SelectMode::Idle),
+            };
             state.selected_ids.clear();
-            state.selection_mode = SelectionMode::None;
-            if state.tool == Tool::Draw {
+            if next_tool == Tool::Draw {
                 state.palette_add_mode = false;
                 if state.palette_last_selected >= state.palette.len() {
                     state.palette_last_selected = 0;
@@ -401,10 +375,10 @@ pub fn run() -> Result<(), JsValue> {
                 state.palette_selected = None;
                 state.palette_add_mode = false;
             }
-            set_tool_button(&eraser_button_cb, state.tool == Tool::Erase);
-            set_tool_button(&pan_button_cb, state.tool == Tool::Pan);
-            set_tool_button(&lasso_button_cb, state.tool == Tool::Select);
-            set_canvas_mode(&state.canvas, state.tool, false);
+            set_tool_button(&eraser_button_cb, next_tool == Tool::Erase);
+            set_tool_button(&pan_button_cb, next_tool == Tool::Pan);
+            set_tool_button(&lasso_button_cb, next_tool == Tool::Select);
+            set_canvas_mode(&state.canvas, next_tool, false);
             render_palette(
                 &document,
                 &palette_el_cb,
@@ -431,15 +405,8 @@ pub fn run() -> Result<(), JsValue> {
                 None => return,
             };
             let mut state = palette_state.borrow_mut();
-            state.tool = Tool::Draw;
-            state.drawing = false;
-            state.current_id = None;
-            state.erasing = false;
-            state.panning = false;
-            state.erase_hits.clear();
-            state.lasso_points.clear();
+            state.mode = Mode::Draw(DrawMode::Idle);
             state.selected_ids.clear();
-            state.selection_mode = SelectionMode::None;
             set_tool_button(&eraser_button_cb, false);
             set_tool_button(&pan_button_cb, false);
             set_tool_button(&lasso_button_cb, false);
@@ -460,12 +427,12 @@ pub fn run() -> Result<(), JsValue> {
                         return;
                     }
                     let already_selected = state.palette_selected == Some(index);
-                    if already_selected && state.tool == Tool::Draw {
+                    if already_selected && state.tool() == Tool::Draw {
                         state.palette_add_mode = false;
                         color_input.click();
                         return;
                     }
-                    state.tool = Tool::Draw;
+                    state.mode = Mode::Draw(DrawMode::Idle);
                     state.palette_selected = Some(index);
                     state.palette_last_selected = index;
                     state.palette_add_mode = false;
@@ -709,7 +676,7 @@ pub fn run() -> Result<(), JsValue> {
                 return;
             }
             event.prevent_default();
-            let tool = { down_state.borrow().tool };
+            let tool = { down_state.borrow().tool() };
             if tool == Tool::Select {
                 let rect = down_canvas.get_bounding_client_rect();
                 let screen_x = event.client_x() as f64 - rect.left();
@@ -745,19 +712,19 @@ pub fn run() -> Result<(), JsValue> {
                                 remove_stroke(&mut state, id);
                             }
                             state.selected_ids.clear();
-                            state.selection_mode = SelectionMode::None;
-                            state.transform_snapshot.clear();
-                            state.lasso_points.clear();
+                            state.mode = Mode::Select(SelectMode::Idle);
                             redraw(&mut state);
                             send_message(&down_socket, &ClientMessage::Remove { ids });
                             return;
                         }
                         SelectionHit::Rotate => {
                             if let Some(center) = selection_center(&state) {
-                                state.selection_mode = SelectionMode::Rotate;
-                                state.transform_center = center;
-                                state.transform_start_angle = angle_between(center, world_point);
-                                state.transform_snapshot = selected_strokes(&state);
+                                let snapshot = selected_strokes(&state);
+                                state.mode = Mode::Select(SelectMode::Rotate {
+                                    center,
+                                    start_angle: angle_between(center, world_point),
+                                    snapshot,
+                                });
                                 let ids = state.selected_ids.clone();
                                 if !ids.is_empty() {
                                     send_message(
@@ -771,11 +738,13 @@ pub fn run() -> Result<(), JsValue> {
                             let dx = (world_point.x - handle.anchor.x) as f64;
                             let dy = (world_point.y - handle.anchor.y) as f64;
                             if dx.abs() > f64::EPSILON || dy.abs() > f64::EPSILON {
-                                state.selection_mode = SelectionMode::Scale;
-                                state.transform_anchor = handle.anchor;
-                                state.transform_start = world_point;
-                                state.transform_scale_axis = handle.axis;
-                                state.transform_snapshot = selected_strokes(&state);
+                                let snapshot = selected_strokes(&state);
+                                state.mode = Mode::Select(SelectMode::Scale {
+                                    anchor: handle.anchor,
+                                    start: world_point,
+                                    axis: handle.axis,
+                                    snapshot,
+                                });
                                 let ids = state.selected_ids.clone();
                                 if !ids.is_empty() {
                                     send_message(
@@ -786,9 +755,11 @@ pub fn run() -> Result<(), JsValue> {
                             }
                         }
                         SelectionHit::Move => {
-                            state.selection_mode = SelectionMode::Move;
-                            state.transform_start = world_point;
-                            state.transform_snapshot = selected_strokes(&state);
+                            let snapshot = selected_strokes(&state);
+                            state.mode = Mode::Select(SelectMode::Move {
+                                start: world_point,
+                                snapshot,
+                            });
                             let ids = state.selected_ids.clone();
                             if !ids.is_empty() {
                                 send_message(&down_socket, &ClientMessage::TransformStart { ids });
@@ -799,20 +770,21 @@ pub fn run() -> Result<(), JsValue> {
                     return;
                 }
                 state.selected_ids.clear();
-                state.lasso_points.clear();
-                state.lasso_points.push(world_point);
-                state.selection_mode = SelectionMode::Lasso;
+                state.mode = Mode::Select(SelectMode::Lasso {
+                    points: vec![world_point],
+                });
                 redraw(&mut state);
                 let _ = down_canvas.set_pointer_capture(event.pointer_id());
                 return;
             }
             if tool == Tool::Pan {
                 let mut state = down_state.borrow_mut();
-                state.panning = true;
-                state.pan_start_x = event.client_x() as f64;
-                state.pan_start_y = event.client_y() as f64;
-                state.pan_origin_x = state.pan_x;
-                state.pan_origin_y = state.pan_y;
+                state.mode = Mode::Pan(PanMode::Active {
+                    start_x: event.client_x() as f64,
+                    start_y: event.client_y() as f64,
+                    origin_x: state.pan_x,
+                    origin_y: state.pan_y,
+                });
                 set_canvas_mode(&state.canvas, Tool::Pan, true);
                 let _ = down_canvas.set_pointer_capture(event.pointer_id());
                 return;
@@ -842,8 +814,9 @@ pub fn run() -> Result<(), JsValue> {
             if tool == Tool::Erase {
                 let removed_ids = {
                     let mut state = down_state.borrow_mut();
-                    state.erasing = true;
-                    state.erase_hits.clear();
+                    state.mode = Mode::Erase(EraseMode::Active {
+                        hits: HashSet::new(),
+                    });
                     erase_hits_at_point(&mut state, point)
                 };
                 for id in removed_ids {
@@ -858,8 +831,7 @@ pub fn run() -> Result<(), JsValue> {
 
             {
                 let mut state = down_state.borrow_mut();
-                state.drawing = true;
-                state.current_id = Some(id.clone());
+                state.mode = Mode::Draw(DrawMode::Drawing { id: id.clone() });
                 start_stroke(&mut state, id.clone(), color.clone(), size, point);
             }
 
@@ -883,161 +855,6 @@ pub fn run() -> Result<(), JsValue> {
         let move_socket = socket.clone();
         let move_canvas = canvas.clone();
         let onmove = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
-            let tool = { move_state.borrow().tool };
-            if tool == Tool::Select {
-                let rect = move_canvas.get_bounding_client_rect();
-                let screen_x = event.client_x() as f64 - rect.left();
-                let screen_y = event.client_y() as f64 - rect.top();
-                let (pan_x, pan_y, zoom, offset_x, offset_y) = {
-                    let state = move_state.borrow();
-                    (
-                        state.pan_x,
-                        state.pan_y,
-                        state.zoom,
-                        state.board_offset_x,
-                        state.board_offset_y,
-                    )
-                };
-                let world_point = match event_to_point(
-                    &move_canvas,
-                    &event,
-                    pan_x,
-                    pan_y,
-                    zoom,
-                    offset_x,
-                    offset_y,
-                ) {
-                    Some(point) => point,
-                    None => return,
-                };
-                let mut state = move_state.borrow_mut();
-                match state.selection_mode {
-                    SelectionMode::Lasso => {
-                        state.lasso_points.push(world_point);
-                        redraw(&mut state);
-                    }
-                    SelectionMode::Move => {
-                        let delta_x = world_point.x - state.transform_start.x;
-                        let delta_y = world_point.y - state.transform_start.y;
-                        let updated =
-                            apply_translation(&state.transform_snapshot, delta_x, delta_y);
-                        apply_transformed_strokes(&mut state, &updated);
-                        for stroke in updated {
-                            send_message(&move_socket, &ClientMessage::StrokeReplace { stroke });
-                        }
-                    }
-                    SelectionMode::Scale => {
-                        let anchor = state.transform_anchor;
-                        let start = state.transform_start;
-                        let axis = state.transform_scale_axis;
-                        let dx0 = (start.x - anchor.x) as f64;
-                        let dy0 = (start.y - anchor.y) as f64;
-                        let dx1 = (world_point.x - anchor.x) as f64;
-                        let dy1 = (world_point.y - anchor.y) as f64;
-                        let mut sx = if dx0.abs() > f64::EPSILON {
-                            dx1 / dx0
-                        } else {
-                            1.0
-                        };
-                        let mut sy = if dy0.abs() > f64::EPSILON {
-                            dy1 / dy0
-                        } else {
-                            1.0
-                        };
-                        match axis {
-                            ScaleAxis::Both => {}
-                            ScaleAxis::X => sy = 1.0,
-                            ScaleAxis::Y => sx = 1.0,
-                        }
-                        sx = clamp_scale(sx, 0.05);
-                        sy = clamp_scale(sy, 0.05);
-                        let updated = apply_scale_xy(&state.transform_snapshot, anchor, sx, sy);
-                        apply_transformed_strokes(&mut state, &updated);
-                        for stroke in updated {
-                            send_message(&move_socket, &ClientMessage::StrokeReplace { stroke });
-                        }
-                    }
-                    SelectionMode::Rotate => {
-                        let angle = angle_between(state.transform_center, world_point);
-                        let delta = angle - state.transform_start_angle;
-                        let updated = apply_rotation(
-                            &state.transform_snapshot,
-                            state.transform_center,
-                            delta,
-                        );
-                        apply_transformed_strokes(&mut state, &updated);
-                        for stroke in updated {
-                            send_message(&move_socket, &ClientMessage::StrokeReplace { stroke });
-                        }
-                    }
-                    SelectionMode::None => {
-                        if selection_hit_test(&state, screen_x, screen_y).is_some() {
-                            set_canvas_mode(&state.canvas, Tool::Select, false);
-                        }
-                    }
-                }
-                return;
-            }
-            if tool == Tool::Erase {
-                let (pan_x, pan_y, zoom, offset_x, offset_y) = {
-                    let state = move_state.borrow();
-                    (
-                        state.pan_x,
-                        state.pan_y,
-                        state.zoom,
-                        state.board_offset_x,
-                        state.board_offset_y,
-                    )
-                };
-                let point = match event_to_point(
-                    &move_canvas,
-                    &event,
-                    pan_x,
-                    pan_y,
-                    zoom,
-                    offset_x,
-                    offset_y,
-                ) {
-                    Some(point) => point,
-                    None => return,
-                };
-                let removed_ids = {
-                    let mut state = move_state.borrow_mut();
-                    if !state.erasing {
-                        return;
-                    }
-                    erase_hits_at_point(&mut state, point)
-                };
-                for id in removed_ids {
-                    send_message(&move_socket, &ClientMessage::Erase { id });
-                }
-                return;
-            }
-
-            let tool = { move_state.borrow().tool };
-            if tool == Tool::Pan {
-                let (pan_start_x, pan_start_y, pan_origin_x, pan_origin_y) = {
-                    let state = move_state.borrow();
-                    if !state.panning {
-                        return;
-                    }
-                    (
-                        state.pan_start_x,
-                        state.pan_start_y,
-                        state.pan_origin_x,
-                        state.pan_origin_y,
-                    )
-                };
-                let next_pan_x = pan_origin_x + (event.client_x() as f64 - pan_start_x);
-                let next_pan_y = pan_origin_y + (event.client_y() as f64 - pan_start_y);
-                {
-                    let mut state = move_state.borrow_mut();
-                    state.pan_x = next_pan_x;
-                    state.pan_y = next_pan_y;
-                    redraw(&mut state);
-                }
-                return;
-            }
             let (pan_x, pan_y, zoom, offset_x, offset_y) = {
                 let state = move_state.borrow();
                 (
@@ -1048,43 +865,145 @@ pub fn run() -> Result<(), JsValue> {
                     state.board_offset_y,
                 )
             };
-            let (id, point, last_point) = {
-                let state = move_state.borrow();
-                if !state.drawing {
-                    return;
+            let mut state = move_state.borrow_mut();
+            match &mut state.mode {
+                Mode::Select(select_mode) => {
+                    let rect = move_canvas.get_bounding_client_rect();
+                    let screen_x = event.client_x() as f64 - rect.left();
+                    let screen_y = event.client_y() as f64 - rect.top();
+                    let world_point = match event_to_point(
+                        &move_canvas,
+                        &event,
+                        pan_x,
+                        pan_y,
+                        zoom,
+                        offset_x,
+                        offset_y,
+                    ) {
+                        Some(point) => point,
+                        None => return,
+                    };
+                    match select_mode {
+                        SelectMode::Lasso { points } => {
+                            points.push(world_point);
+                            redraw(&mut state);
+                        }
+                        SelectMode::Move { start, snapshot } => {
+                            let delta_x = world_point.x - start.x;
+                            let delta_y = world_point.y - start.y;
+                            let updated = apply_translation(snapshot, delta_x, delta_y);
+                            apply_transformed_strokes(&mut state, &updated);
+                            for stroke in updated {
+                                send_message(&move_socket, &ClientMessage::StrokeReplace { stroke });
+                            }
+                        }
+                        SelectMode::Scale {
+                            anchor,
+                            start,
+                            axis,
+                            snapshot,
+                        } => {
+                            let dx0 = (start.x - anchor.x) as f64;
+                            let dy0 = (start.y - anchor.y) as f64;
+                            let dx1 = (world_point.x - anchor.x) as f64;
+                            let dy1 = (world_point.y - anchor.y) as f64;
+                            let mut sx = if dx0.abs() > f64::EPSILON {
+                                dx1 / dx0
+                            } else {
+                                1.0
+                            };
+                            let mut sy = if dy0.abs() > f64::EPSILON {
+                                dy1 / dy0
+                            } else {
+                                1.0
+                            };
+                            match axis {
+                                ScaleAxis::Both => {}
+                                ScaleAxis::X => sy = 1.0,
+                                ScaleAxis::Y => sx = 1.0,
+                            }
+                            sx = clamp_scale(sx, 0.05);
+                            sy = clamp_scale(sy, 0.05);
+                            let updated = apply_scale_xy(snapshot, *anchor, sx, sy);
+                            apply_transformed_strokes(&mut state, &updated);
+                            for stroke in updated {
+                                send_message(&move_socket, &ClientMessage::StrokeReplace { stroke });
+                            }
+                        }
+                        SelectMode::Rotate {
+                            center,
+                            start_angle,
+                            snapshot,
+                        } => {
+                            let angle = angle_between(*center, world_point);
+                            let delta = angle - *start_angle;
+                            let updated = apply_rotation(snapshot, *center, delta);
+                            apply_transformed_strokes(&mut state, &updated);
+                            for stroke in updated {
+                                send_message(&move_socket, &ClientMessage::StrokeReplace { stroke });
+                            }
+                        }
+                        SelectMode::Idle => {
+                            if selection_hit_test(&state, screen_x, screen_y).is_some() {
+                                set_canvas_mode(&state.canvas, Tool::Select, false);
+                            }
+                        }
+                    }
                 }
-                let id = match state.current_id.clone() {
-                    Some(id) => id,
-                    None => return,
-                };
-                let point = match event_to_point(
-                    &move_canvas,
-                    &event,
-                    pan_x,
-                    pan_y,
-                    zoom,
-                    offset_x,
-                    offset_y,
-                ) {
-                    Some(point) => point,
-                    None => return,
-                };
-                let last_point = last_point_for_id(&state.strokes, &id);
-                (id, point, last_point)
-            };
-
-            if let Some(last_point) = last_point {
-                if last_point == point {
-                    return;
+                Mode::Erase(EraseMode::Active { .. }) => {
+                    let point = match event_to_point(
+                        &move_canvas,
+                        &event,
+                        pan_x,
+                        pan_y,
+                        zoom,
+                        offset_x,
+                        offset_y,
+                    ) {
+                        Some(point) => point,
+                        None => return,
+                    };
+                    let removed_ids = erase_hits_at_point(&mut state, point);
+                    for id in removed_ids {
+                        send_message(&move_socket, &ClientMessage::Erase { id });
+                    }
                 }
+                Mode::Pan(PanMode::Active {
+                    start_x,
+                    start_y,
+                    origin_x,
+                    origin_y,
+                }) => {
+                    let next_pan_x = *origin_x + (event.client_x() as f64 - *start_x);
+                    let next_pan_y = *origin_y + (event.client_y() as f64 - *start_y);
+                    state.pan_x = next_pan_x;
+                    state.pan_y = next_pan_y;
+                    redraw(&mut state);
+                }
+                Mode::Draw(DrawMode::Drawing { id }) => {
+                    let point = match event_to_point(
+                        &move_canvas,
+                        &event,
+                        pan_x,
+                        pan_y,
+                        zoom,
+                        offset_x,
+                        offset_y,
+                    ) {
+                        Some(point) => point,
+                        None => return,
+                    };
+                    let id = id.clone();
+                    if let Some(last_point) = last_point_for_id(&state.strokes, &id) {
+                        if last_point == point {
+                            return;
+                        }
+                    }
+                    move_stroke(&mut state, &id, point);
+                    send_message(&move_socket, &ClientMessage::StrokeMove { id, point });
+                }
+                _ => {}
             }
-
-            {
-                let mut state = move_state.borrow_mut();
-                move_stroke(&mut state, &id, point);
-            }
-
-            send_message(&move_socket, &ClientMessage::StrokeMove { id, point });
         });
         canvas.add_event_listener_with_callback("pointermove", onmove.as_ref().unchecked_ref())?;
         onmove.forget();
@@ -1095,91 +1014,58 @@ pub fn run() -> Result<(), JsValue> {
         let stop_socket = socket.clone();
         let stop_canvas = canvas.clone();
         let onstop = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
-            if stop_state.borrow().tool == Tool::Select {
-                event.prevent_default();
-                if stop_canvas.has_pointer_capture(event.pointer_id()) {
-                    let _ = stop_canvas.release_pointer_capture(event.pointer_id());
-                }
-                let mut state = stop_state.borrow_mut();
-                let end_ids = match state.selection_mode {
-                    SelectionMode::Move | SelectionMode::Scale | SelectionMode::Rotate => {
-                        Some(state.selected_ids.clone())
-                    }
-                    _ => None,
-                };
-                match state.selection_mode {
-                    SelectionMode::Lasso => {
-                        finalize_lasso_selection(&mut state);
-                    }
-                    SelectionMode::Move
-                    | SelectionMode::Scale
-                    | SelectionMode::Rotate
-                    | SelectionMode::None => {}
-                }
-                state.selection_mode = SelectionMode::None;
-                state.transform_snapshot.clear();
-                state.lasso_points.clear();
-                redraw(&mut state);
-                drop(state);
-                if let Some(ids) = end_ids {
-                    if !ids.is_empty() {
-                        send_message(&stop_socket, &ClientMessage::TransformEnd { ids });
-                    }
-                }
+            let mut state = stop_state.borrow_mut();
+            let active = matches!(
+                &state.mode,
+                Mode::Select(_)
+                    | Mode::Erase(EraseMode::Active { .. })
+                    | Mode::Pan(PanMode::Active { .. })
+                    | Mode::Draw(DrawMode::Drawing { .. })
+            );
+            if !active {
                 return;
             }
-            let mode = {
-                let state = stop_state.borrow();
-                if state.drawing {
-                    Some(Tool::Draw)
-                } else if state.erasing {
-                    Some(Tool::Erase)
-                } else if state.panning {
-                    Some(Tool::Pan)
-                } else {
-                    None
-                }
-            };
-
-            let Some(mode) = mode else {
-                return;
-            };
-
             event.prevent_default();
             if stop_canvas.has_pointer_capture(event.pointer_id()) {
                 let _ = stop_canvas.release_pointer_capture(event.pointer_id());
             }
-
-            if mode == Tool::Erase {
-                let mut state = stop_state.borrow_mut();
-                state.erasing = false;
-                state.erase_hits.clear();
-                return;
+            let selected_ids = state.selected_ids.clone();
+            match &mut state.mode {
+                Mode::Select(select_mode) => {
+                    let end_ids = match select_mode {
+                        SelectMode::Move { .. }
+                        | SelectMode::Scale { .. }
+                        | SelectMode::Rotate { .. } => Some(selected_ids),
+                        _ => None,
+                    };
+                    if matches!(select_mode, SelectMode::Lasso { .. }) {
+                        finalize_lasso_selection(&mut state);
+                    }
+                    state.mode = Mode::Select(SelectMode::Idle);
+                    redraw(&mut state);
+                    drop(state);
+                    if let Some(ids) = end_ids {
+                        if !ids.is_empty() {
+                            send_message(&stop_socket, &ClientMessage::TransformEnd { ids });
+                        }
+                    }
+                }
+                Mode::Erase(EraseMode::Active { .. }) => {
+                    state.mode = Mode::Erase(EraseMode::Idle);
+                }
+                Mode::Pan(PanMode::Active { .. }) => {
+                    state.mode = Mode::Pan(PanMode::Idle);
+                    set_canvas_mode(&state.canvas, Tool::Pan, false);
+                }
+                Mode::Draw(DrawMode::Drawing { id }) => {
+                    let id = id.clone();
+                    state.mode = Mode::Draw(DrawMode::Idle);
+                    end_stroke(&mut state, &id);
+                    drop(state);
+                    send_message(&stop_socket, &ClientMessage::StrokeEnd { id });
+                }
+                _ => {}
             }
-            if mode == Tool::Pan {
-                let mut state = stop_state.borrow_mut();
-                state.panning = false;
-                set_canvas_mode(&state.canvas, Tool::Pan, false);
-                return;
-            }
-
-            let id = {
-                let state = stop_state.borrow();
-                state.current_id.clone()
-            };
-
-            let Some(id) = id else {
-                return;
-            };
-
-            {
-                let mut state = stop_state.borrow_mut();
-                state.drawing = false;
-                state.current_id = None;
-                end_stroke(&mut state, &id);
-            }
-
-            send_message(&stop_socket, &ClientMessage::StrokeEnd { id });
         });
         canvas.add_event_listener_with_callback("pointerup", onstop.as_ref().unchecked_ref())?;
         canvas
