@@ -93,6 +93,7 @@ struct State {
     lasso_points: Vec<Point>,
     palette: Vec<String>,
     palette_selected: usize,
+    palette_add_mode: bool,
     selection_mode: SelectionMode,
     transform_center: Point,
     transform_anchor: Point,
@@ -168,6 +169,7 @@ pub fn run() -> Result<(), JsValue> {
         lasso_points: Vec::new(),
         palette: DEFAULT_PALETTE.iter().map(|value| value.to_string()).collect(),
         palette_selected: 0,
+        palette_add_mode: false,
         selection_mode: SelectionMode::None,
         transform_center: Point { x: 0.0, y: 0.0 },
         transform_anchor: Point { x: 0.0, y: 0.0 },
@@ -470,23 +472,38 @@ pub fn run() -> Result<(), JsValue> {
         let color_input = color_input.clone();
         let document = document.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
-            let index = match palette_index_from_event(&event) {
-                Some(index) => index,
+            let action = match palette_action_from_event(&event) {
+                Some(action) => action,
                 None => return,
             };
             let mut state = palette_state.borrow_mut();
-            if index >= state.palette.len() {
-                return;
+            match action {
+                PaletteAction::Add => {
+                    state.palette_add_mode = true;
+                    color_input.click();
+                }
+                PaletteAction::Select(index) => {
+                    if index >= state.palette.len() {
+                        return;
+                    }
+                    if index == state.palette_selected {
+                        state.palette_add_mode = false;
+                        color_input.click();
+                        return;
+                    }
+                    state.palette_selected = index;
+                    state.palette_add_mode = false;
+                    if let Some(color) = state.palette.get(index).cloned() {
+                        color_input.set_value(&color);
+                    }
+                    render_palette(
+                        &document,
+                        &palette_el_cb,
+                        &state.palette,
+                        state.palette_selected,
+                    );
+                }
             }
-            if index == state.palette_selected {
-                color_input.click();
-                return;
-            }
-            state.palette_selected = index;
-            if let Some(color) = state.palette.get(index).cloned() {
-                color_input.set_value(&color);
-            }
-            render_palette(&document, &palette_el_cb, &state.palette, state.palette_selected);
         });
         palette_el_listener.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
@@ -501,12 +518,18 @@ pub fn run() -> Result<(), JsValue> {
         let oninput = Closure::<dyn FnMut(Event)>::new(move |_| {
             let color = color_input_cb.value();
             let mut state = palette_state.borrow_mut();
-            if state.palette_selected >= state.palette.len() {
-                state.palette_selected = 0;
-            }
-            let selected = state.palette_selected;
-            if let Some(entry) = state.palette.get_mut(selected) {
-                *entry = color;
+            if state.palette_add_mode {
+                state.palette.push(color);
+                state.palette_selected = state.palette.len().saturating_sub(1);
+                state.palette_add_mode = false;
+            } else {
+                if state.palette_selected >= state.palette.len() {
+                    state.palette_selected = 0;
+                }
+                let selected = state.palette_selected;
+                if let Some(entry) = state.palette.get_mut(selected) {
+                    *entry = color;
+                }
             }
             render_palette(&document, &palette_el_cb, &state.palette, state.palette_selected);
         });
@@ -1330,15 +1353,40 @@ fn render_palette(
         let _ = button.style().set_property("background", color);
         let _ = palette_el.append_child(&button);
     }
+    if let Ok(element) = document.create_element("button") {
+        if let Ok(button) = element.dyn_into::<HtmlButtonElement>() {
+            let _ = button.set_attribute("type", "button");
+            let _ = button.set_attribute("data-action", "add");
+            let _ = button.set_attribute("aria-label", "Add palette color");
+            let _ = button.set_attribute("class", "swatch add-swatch");
+            button.set_inner_html(
+                "<svg viewBox=\"0 0 20 20\" aria-hidden=\"true\"><path d=\"M10 4v12M4 10h12\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/></svg>",
+            );
+            let _ = palette_el.append_child(&button);
+        }
+    }
 }
 
-fn palette_index_from_event(event: &Event) -> Option<usize> {
+enum PaletteAction {
+    Select(usize),
+    Add,
+}
+
+fn palette_action_from_event(event: &Event) -> Option<PaletteAction> {
     let mut current = event
         .target()
         .and_then(|target| target.dyn_into::<Element>().ok());
     while let Some(element) = current {
+        if let Some(action) = element.get_attribute("data-action") {
+            if action == "add" {
+                return Some(PaletteAction::Add);
+            }
+        }
         if let Some(index) = element.get_attribute("data-index") {
-            return index.parse::<usize>().ok();
+            if let Ok(index) = index.parse::<usize>() {
+                return Some(PaletteAction::Select(index));
+            }
+            return None;
         }
         current = element.parent_element().map(|parent| parent.into());
     }

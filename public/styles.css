@@ -124,6 +124,19 @@ body {
   box-shadow: 0 0 0 2px rgba(26, 31, 42, 0.2);
 }
 
+.add-swatch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.add-swatch svg {
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+}
+
 .range-control {
   grid-template-columns: 1fr;
   align-items: center;
