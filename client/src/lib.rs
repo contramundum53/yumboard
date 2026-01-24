@@ -29,6 +29,7 @@ struct State {
     board_scale: f64,
     board_offset_x: f64,
     board_offset_y: f64,
+    zoom: f64,
     current_id: Option<String>,
     drawing: bool,
     erasing: bool,
@@ -83,6 +84,7 @@ pub fn run() -> Result<(), JsValue> {
         board_scale: 0.0,
         board_offset_x: 0.0,
         board_offset_y: 0.0,
+        zoom: 1.0,
         current_id: None,
         drawing: false,
         erasing: false,
@@ -322,11 +324,11 @@ pub fn run() -> Result<(), JsValue> {
                 let _ = down_canvas.set_pointer_capture(event.pointer_id());
                 return;
             }
-            let (pan_x, pan_y) = {
+            let (pan_x, pan_y, zoom) = {
                 let state = down_state.borrow();
-                (state.pan_x, state.pan_y)
+                (state.pan_x, state.pan_y, state.zoom)
             };
-            let point = match event_to_point(&down_canvas, &event, pan_x, pan_y) {
+            let point = match event_to_point(&down_canvas, &event, pan_x, pan_y, zoom) {
                 Some(point) => point,
                 None => return,
             };
@@ -376,11 +378,11 @@ pub fn run() -> Result<(), JsValue> {
         let onmove = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             let tool = { move_state.borrow().tool };
             if tool == Tool::Erase {
-                let (pan_x, pan_y) = {
+                let (pan_x, pan_y, zoom) = {
                     let state = move_state.borrow();
-                    (state.pan_x, state.pan_y)
+                    (state.pan_x, state.pan_y, state.zoom)
                 };
-                let point = match event_to_point(&move_canvas, &event, pan_x, pan_y) {
+                let point = match event_to_point(&move_canvas, &event, pan_x, pan_y, zoom) {
                     Some(point) => point,
                     None => return,
                 };
@@ -421,9 +423,9 @@ pub fn run() -> Result<(), JsValue> {
                 }
                 return;
             }
-            let (pan_x, pan_y) = {
+            let (pan_x, pan_y, zoom) = {
                 let state = move_state.borrow();
-                (state.pan_x, state.pan_y)
+                (state.pan_x, state.pan_y, state.zoom)
             };
             let (id, point, last_point) = {
                 let state = move_state.borrow();
@@ -434,7 +436,7 @@ pub fn run() -> Result<(), JsValue> {
                     Some(id) => id,
                     None => return,
                 };
-                let point = match event_to_point(&move_canvas, &event, pan_x, pan_y) {
+                let point = match event_to_point(&move_canvas, &event, pan_x, pan_y, zoom) {
                     Some(point) => point,
                     None => return,
                 };
@@ -524,6 +526,52 @@ pub fn run() -> Result<(), JsValue> {
         onstop.forget();
     }
 
+    {
+        let zoom_state = state.clone();
+        let zoom_canvas = canvas.clone();
+        let onwheel = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
+            let wheel_event = match event.dyn_into::<web_sys::WheelEvent>() {
+                Ok(event) => event,
+                Err(_) => return,
+            };
+            wheel_event.prevent_default();
+            let rect = zoom_canvas.get_bounding_client_rect();
+            let (offset_x, offset_y, board_scale, zoom, pan_x, pan_y) = {
+                let state = zoom_state.borrow();
+                (
+                    state.board_offset_x,
+                    state.board_offset_y,
+                    state.board_scale,
+                    state.zoom,
+                    state.pan_x,
+                    state.pan_y,
+                )
+            };
+            if board_scale <= 0.0 {
+                return;
+            }
+            let scale = board_scale * zoom;
+            let cursor_x = wheel_event.client_x() as f64 - rect.left();
+            let cursor_y = wheel_event.client_y() as f64 - rect.top();
+            let world_x = (cursor_x - pan_x - offset_x) / scale;
+            let world_y = (cursor_y - pan_y - offset_y) / scale;
+            let zoom_factor = if wheel_event.delta_y() < 0.0 { 1.1 } else { 0.9 };
+            let next_zoom = (zoom * zoom_factor).clamp(0.4, 4.0);
+            let next_scale = board_scale * next_zoom;
+            let next_pan_x = cursor_x - offset_x - world_x * next_scale;
+            let next_pan_y = cursor_y - offset_y - world_y * next_scale;
+            {
+                let mut state = zoom_state.borrow_mut();
+                state.zoom = next_zoom;
+                state.pan_x = next_pan_x;
+                state.pan_y = next_pan_y;
+                redraw(&mut state);
+            }
+        });
+        canvas.add_event_listener_with_callback("wheel", onwheel.as_ref().unchecked_ref())?;
+        onwheel.forget();
+    }
+
     Ok(())
 }
 
@@ -594,6 +642,7 @@ fn event_to_point(
     event: &PointerEvent,
     pan_x: f64,
     pan_y: f64,
+    zoom: f64,
 ) -> Option<Point> {
     let rect = canvas.get_bounding_client_rect();
     if rect.width() <= 0.0 || rect.height() <= 0.0 {
@@ -603,6 +652,7 @@ fn event_to_point(
     if scale <= 0.0 {
         return None;
     }
+    let scale = scale * zoom;
     let offset_x = (rect.width() - scale) / 2.0;
     let offset_y = (rect.height() - scale) / 2.0;
     let x = (event.client_x() as f64 - rect.left() - pan_x - offset_x) / scale;
@@ -640,14 +690,16 @@ fn draw_dot(
     board_scale: f64,
     board_offset_x: f64,
     board_offset_y: f64,
+    zoom: f64,
     pan_x: f64,
     pan_y: f64,
     point: Point,
     color: &str,
     size: f32,
 ) {
-    let x = point.x as f64 * board_scale + board_offset_x + pan_x;
-    let y = point.y as f64 * board_scale + board_offset_y + pan_y;
+    let scale = board_scale * zoom;
+    let x = point.x as f64 * scale + board_offset_x + pan_x;
+    let y = point.y as f64 * scale + board_offset_y + pan_y;
     ctx.set_fill_style_str(color);
     ctx.begin_path();
     let _ = ctx.arc(x, y, size as f64 / 2.0, 0.0, std::f64::consts::PI * 2.0);
@@ -659,6 +711,7 @@ fn draw_segment(
     board_scale: f64,
     board_offset_x: f64,
     board_offset_y: f64,
+    zoom: f64,
     pan_x: f64,
     pan_y: f64,
     from: Point,
@@ -666,10 +719,11 @@ fn draw_segment(
     color: &str,
     size: f32,
 ) {
-    let from_x = from.x as f64 * board_scale + board_offset_x + pan_x;
-    let from_y = from.y as f64 * board_scale + board_offset_y + pan_y;
-    let to_x = to.x as f64 * board_scale + board_offset_x + pan_x;
-    let to_y = to.y as f64 * board_scale + board_offset_y + pan_y;
+    let scale = board_scale * zoom;
+    let from_x = from.x as f64 * scale + board_offset_x + pan_x;
+    let from_y = from.y as f64 * scale + board_offset_y + pan_y;
+    let to_x = to.x as f64 * scale + board_offset_x + pan_x;
+    let to_y = to.y as f64 * scale + board_offset_y + pan_y;
 
     ctx.set_stroke_style_str(color);
     ctx.set_line_width(size as f64);
@@ -689,6 +743,7 @@ fn draw_stroke(state: &State, stroke: &Stroke) {
             state.board_scale,
             state.board_offset_x,
             state.board_offset_y,
+            state.zoom,
             state.pan_x,
             state.pan_y,
             stroke.points[0],
@@ -703,6 +758,7 @@ fn draw_stroke(state: &State, stroke: &Stroke) {
             state.board_scale,
             state.board_offset_x,
             state.board_offset_y,
+            state.zoom,
             state.pan_x,
             state.pan_y,
             stroke.points[i - 1],
@@ -742,6 +798,7 @@ fn start_stroke(state: &mut State, id: String, color: String, size: f32, point: 
         state.board_scale,
         state.board_offset_x,
         state.board_offset_y,
+        state.zoom,
         state.pan_x,
         state.pan_y,
         point,
@@ -775,6 +832,7 @@ fn move_stroke(state: &mut State, id: &str, point: Point) {
                 state.board_scale,
                 state.board_offset_x,
                 state.board_offset_y,
+                state.zoom,
                 state.pan_x,
                 state.pan_y,
                 to,
@@ -787,6 +845,7 @@ fn move_stroke(state: &mut State, id: &str, point: Point) {
                 state.board_scale,
                 state.board_offset_x,
                 state.board_offset_y,
+                state.zoom,
                 state.pan_x,
                 state.pan_y,
                 from,
@@ -830,8 +889,9 @@ fn erase_hits_at_point(state: &mut State, point: Point) -> Vec<String> {
     if state.board_scale <= 0.0 {
         return Vec::new();
     }
-    let px = point.x as f64 * state.board_scale + state.board_offset_x + state.pan_x;
-    let py = point.y as f64 * state.board_scale + state.board_offset_y + state.pan_y;
+    let scale = state.board_scale * state.zoom;
+    let px = point.x as f64 * scale + state.board_offset_x + state.pan_x;
+    let py = point.y as f64 * scale + state.board_offset_y + state.pan_y;
     let mut removed = Vec::new();
     let mut index = state.strokes.len();
 
@@ -845,7 +905,7 @@ fn erase_hits_at_point(state: &mut State, point: Point) -> Vec<String> {
             stroke,
             px,
             py,
-            state.board_scale,
+            scale,
             state.board_offset_x,
             state.board_offset_y,
             state.pan_x,

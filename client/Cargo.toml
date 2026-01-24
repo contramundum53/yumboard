@@ -34,6 +34,7 @@ features = [
   "Location",
   "MessageEvent",
   "PointerEvent",
+  "WheelEvent",
   "WebSocket",
   "Window"
 ]
