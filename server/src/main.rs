@@ -450,7 +450,7 @@ fn normalize_point(point: Point) -> Option<Point> {
     if !point.x.is_finite() || !point.y.is_finite() {
         return None;
     }
-    Some(point.clamp())
+    Some(point)
 }
 
 fn sanitize_color(mut color: String) -> String {

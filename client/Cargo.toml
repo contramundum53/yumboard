@@ -19,6 +19,7 @@ version = "0.3"
 features = [
   "CanvasRenderingContext2d",
   "CloseEvent",
+  "CssStyleDeclaration",
   "Document",
   "DomRect",
   "Element",
@@ -26,6 +27,7 @@ features = [
   "EventTarget",
   "HtmlButtonElement",
   "HtmlCanvasElement",
+  "HtmlElement",
   "HtmlInputElement",
   "HtmlSpanElement",
   "KeyboardEvent",

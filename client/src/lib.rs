@@ -6,8 +6,8 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
     CanvasRenderingContext2d, Document, Element, Event, HtmlButtonElement, HtmlCanvasElement,
-    HtmlInputElement, HtmlSpanElement, KeyboardEvent, MessageEvent, PointerEvent, WebSocket,
-    Window,
+    HtmlElement, HtmlInputElement, HtmlSpanElement, KeyboardEvent, MessageEvent, PointerEvent,
+    WebSocket, Window,
 };
 
 use pfboard_shared::{ClientMessage, Point, ServerMessage, Stroke};
@@ -16,6 +16,7 @@ use pfboard_shared::{ClientMessage, Point, ServerMessage, Stroke};
 enum Tool {
     Draw,
     Erase,
+    Pan,
 }
 
 struct State {
@@ -30,6 +31,13 @@ struct State {
     erasing: bool,
     tool: Tool,
     erase_hits: HashSet<String>,
+    panning: bool,
+    pan_start_x: f64,
+    pan_start_y: f64,
+    pan_origin_x: f64,
+    pan_origin_y: f64,
+    pan_x: f64,
+    pan_y: f64,
 }
 
 #[wasm_bindgen(start)]
@@ -54,6 +62,7 @@ pub fn run() -> Result<(), JsValue> {
     let size_value: HtmlSpanElement = get_element(&document, "sizeValue")?;
     let clear_button: HtmlButtonElement = get_element(&document, "clear")?;
     let eraser_button: HtmlButtonElement = get_element(&document, "eraser")?;
+    let pan_button: HtmlButtonElement = get_element(&document, "pan")?;
     let status_el = document
         .get_element_by_id("status")
         .ok_or_else(|| JsValue::from_str("Missing status element"))?;
@@ -73,11 +82,20 @@ pub fn run() -> Result<(), JsValue> {
         erasing: false,
         tool: Tool::Draw,
         erase_hits: HashSet::new(),
+        panning: false,
+        pan_start_x: 0.0,
+        pan_start_y: 0.0,
+        pan_origin_x: 0.0,
+        pan_origin_y: 0.0,
+        pan_x: 0.0,
+        pan_y: 0.0,
     }));
 
     update_size_label(&size_input, &size_value);
     set_status(&status_el, &status_text, "connecting", "Connecting...");
     set_tool_button(&eraser_button, false);
+    set_tool_button(&pan_button, false);
+    set_canvas_mode(&canvas, Tool::Draw, false);
 
     let ws_url = websocket_url(&window)?;
     let socket = Rc::new(WebSocket::new(&ws_url)?);
@@ -214,20 +232,50 @@ pub fn run() -> Result<(), JsValue> {
     {
         let tool_state = state.clone();
         let eraser_button_cb = eraser_button.clone();
+        let pan_button_cb = pan_button.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = tool_state.borrow_mut();
             state.tool = if state.tool == Tool::Draw {
                 Tool::Erase
-            } else {
+            } else if state.tool == Tool::Erase {
                 Tool::Draw
+            } else {
+                Tool::Erase
             };
             state.drawing = false;
             state.current_id = None;
             state.erasing = false;
+            state.panning = false;
             state.erase_hits.clear();
+            set_tool_button(&pan_button_cb, state.tool == Tool::Pan);
             set_tool_button(&eraser_button_cb, state.tool == Tool::Erase);
+            set_canvas_mode(&state.canvas, state.tool, false);
         });
         eraser_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
+        onclick.forget();
+    }
+
+    {
+        let tool_state = state.clone();
+        let eraser_button_cb = eraser_button.clone();
+        let pan_button_cb = pan_button.clone();
+        let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
+            let mut state = tool_state.borrow_mut();
+            state.tool = if state.tool == Tool::Pan {
+                Tool::Draw
+            } else {
+                Tool::Pan
+            };
+            state.drawing = false;
+            state.current_id = None;
+            state.erasing = false;
+            state.panning = false;
+            state.erase_hits.clear();
+            set_tool_button(&eraser_button_cb, state.tool == Tool::Erase);
+            set_tool_button(&pan_button_cb, state.tool == Tool::Pan);
+            set_canvas_mode(&state.canvas, state.tool, false);
+        });
+        pan_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
     }
 
@@ -257,7 +305,22 @@ pub fn run() -> Result<(), JsValue> {
             }
             event.prevent_default();
             let tool = { down_state.borrow().tool };
-            let point = match event_to_point(&down_canvas, &event) {
+            if tool == Tool::Pan {
+                let mut state = down_state.borrow_mut();
+                state.panning = true;
+                state.pan_start_x = event.client_x() as f64;
+                state.pan_start_y = event.client_y() as f64;
+                state.pan_origin_x = state.pan_x;
+                state.pan_origin_y = state.pan_y;
+                set_canvas_mode(&state.canvas, Tool::Pan, true);
+                let _ = down_canvas.set_pointer_capture(event.pointer_id());
+                return;
+            }
+            let (pan_x, pan_y) = {
+                let state = down_state.borrow();
+                (state.pan_x, state.pan_y)
+            };
+            let point = match event_to_point(&down_canvas, &event, pan_x, pan_y) {
                 Some(point) => point,
                 None => return,
             };
@@ -307,7 +370,11 @@ pub fn run() -> Result<(), JsValue> {
         let onmove = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             let tool = { move_state.borrow().tool };
             if tool == Tool::Erase {
-                let point = match event_to_point(&move_canvas, &event) {
+                let (pan_x, pan_y) = {
+                    let state = move_state.borrow();
+                    (state.pan_x, state.pan_y)
+                };
+                let point = match event_to_point(&move_canvas, &event, pan_x, pan_y) {
                     Some(point) => point,
                     None => return,
                 };
@@ -324,6 +391,34 @@ pub fn run() -> Result<(), JsValue> {
                 return;
             }
 
+            let tool = { move_state.borrow().tool };
+            if tool == Tool::Pan {
+                let (pan_start_x, pan_start_y, pan_origin_x, pan_origin_y) = {
+                    let state = move_state.borrow();
+                    if !state.panning {
+                        return;
+                    }
+                    (
+                        state.pan_start_x,
+                        state.pan_start_y,
+                        state.pan_origin_x,
+                        state.pan_origin_y,
+                    )
+                };
+                let next_pan_x = pan_origin_x + (event.client_x() as f64 - pan_start_x);
+                let next_pan_y = pan_origin_y + (event.client_y() as f64 - pan_start_y);
+                {
+                    let mut state = move_state.borrow_mut();
+                    state.pan_x = next_pan_x;
+                    state.pan_y = next_pan_y;
+                    redraw(&mut state);
+                }
+                return;
+            }
+            let (pan_x, pan_y) = {
+                let state = move_state.borrow();
+                (state.pan_x, state.pan_y)
+            };
             let (id, point, last_point) = {
                 let state = move_state.borrow();
                 if !state.drawing {
@@ -333,7 +428,7 @@ pub fn run() -> Result<(), JsValue> {
                     Some(id) => id,
                     None => return,
                 };
-                let point = match event_to_point(&move_canvas, &event) {
+                let point = match event_to_point(&move_canvas, &event, pan_x, pan_y) {
                     Some(point) => point,
                     None => return,
                 };
@@ -369,6 +464,8 @@ pub fn run() -> Result<(), JsValue> {
                     Some(Tool::Draw)
                 } else if state.erasing {
                     Some(Tool::Erase)
+                } else if state.panning {
+                    Some(Tool::Pan)
                 } else {
                     None
                 }
@@ -387,6 +484,12 @@ pub fn run() -> Result<(), JsValue> {
                 let mut state = stop_state.borrow_mut();
                 state.erasing = false;
                 state.erase_hits.clear();
+                return;
+            }
+            if mode == Tool::Pan {
+                let mut state = stop_state.borrow_mut();
+                state.panning = false;
+                set_canvas_mode(&state.canvas, Tool::Pan, false);
                 return;
             }
 
@@ -444,6 +547,23 @@ fn set_tool_button(button: &HtmlButtonElement, active: bool) {
     let _ = button.set_attribute("aria-pressed", pressed);
 }
 
+fn set_canvas_mode(canvas: &HtmlCanvasElement, tool: Tool, dragging: bool) {
+    let cursor = match tool {
+        Tool::Pan => {
+            if dragging {
+                "grabbing"
+            } else {
+                "grab"
+            }
+        }
+        Tool::Erase => "cell",
+        Tool::Draw => "crosshair",
+    };
+    if let Ok(element) = canvas.clone().dyn_into::<HtmlElement>() {
+        let _ = element.style().set_property("cursor", cursor);
+    }
+}
+
 fn set_status(status_el: &Element, status_text: &Element, state: &str, text: &str) {
     let _ = status_el.set_attribute("data-state", state);
     status_text.set_text_content(Some(text));
@@ -460,13 +580,18 @@ fn resize_canvas(window: &Window, state: &mut State) {
     redraw(state);
 }
 
-fn event_to_point(canvas: &HtmlCanvasElement, event: &PointerEvent) -> Option<Point> {
+fn event_to_point(
+    canvas: &HtmlCanvasElement,
+    event: &PointerEvent,
+    pan_x: f64,
+    pan_y: f64,
+) -> Option<Point> {
     let rect = canvas.get_bounding_client_rect();
     if rect.width() <= 0.0 || rect.height() <= 0.0 {
         return None;
     }
-    let x = (event.client_x() as f64 - rect.left()) / rect.width();
-    let y = (event.client_y() as f64 - rect.top()) / rect.height();
+    let x = (event.client_x() as f64 - rect.left() - pan_x) / rect.width();
+    let y = (event.client_y() as f64 - rect.top() - pan_y) / rect.height();
     normalize_point(Point {
         x: x as f32,
         y: y as f32,
@@ -477,7 +602,7 @@ fn normalize_point(point: Point) -> Option<Point> {
     if !point.x.is_finite() || !point.y.is_finite() {
         return None;
     }
-    Some(point.clamp())
+    Some(point)
 }
 
 fn sanitize_color(mut color: String) -> String {
@@ -499,12 +624,14 @@ fn draw_dot(
     ctx: &CanvasRenderingContext2d,
     board_width: f64,
     board_height: f64,
+    pan_x: f64,
+    pan_y: f64,
     point: Point,
     color: &str,
     size: f32,
 ) {
-    let x = point.x as f64 * board_width;
-    let y = point.y as f64 * board_height;
+    let x = point.x as f64 * board_width + pan_x;
+    let y = point.y as f64 * board_height + pan_y;
     ctx.set_fill_style_str(color);
     ctx.begin_path();
     let _ = ctx.arc(x, y, size as f64 / 2.0, 0.0, std::f64::consts::PI * 2.0);
@@ -515,15 +642,17 @@ fn draw_segment(
     ctx: &CanvasRenderingContext2d,
     board_width: f64,
     board_height: f64,
+    pan_x: f64,
+    pan_y: f64,
     from: Point,
     to: Point,
     color: &str,
     size: f32,
 ) {
-    let from_x = from.x as f64 * board_width;
-    let from_y = from.y as f64 * board_height;
-    let to_x = to.x as f64 * board_width;
-    let to_y = to.y as f64 * board_height;
+    let from_x = from.x as f64 * board_width + pan_x;
+    let from_y = from.y as f64 * board_height + pan_y;
+    let to_x = to.x as f64 * board_width + pan_x;
+    let to_y = to.y as f64 * board_height + pan_y;
 
     ctx.set_stroke_style_str(color);
     ctx.set_line_width(size as f64);
@@ -542,6 +671,8 @@ fn draw_stroke(state: &State, stroke: &Stroke) {
             &state.ctx,
             state.board_width,
             state.board_height,
+            state.pan_x,
+            state.pan_y,
             stroke.points[0],
             &stroke.color,
             stroke.size,
@@ -553,6 +684,8 @@ fn draw_stroke(state: &State, stroke: &Stroke) {
             &state.ctx,
             state.board_width,
             state.board_height,
+            state.pan_x,
+            state.pan_y,
             stroke.points[i - 1],
             stroke.points[i],
             &stroke.color,
@@ -589,6 +722,8 @@ fn start_stroke(state: &mut State, id: String, color: String, size: f32, point: 
         &state.ctx,
         state.board_width,
         state.board_height,
+        state.pan_x,
+        state.pan_y,
         point,
         &color,
         size,
@@ -619,6 +754,8 @@ fn move_stroke(state: &mut State, id: &str, point: Point) {
                 &state.ctx,
                 state.board_width,
                 state.board_height,
+                state.pan_x,
+                state.pan_y,
                 to,
                 &color,
                 size,
@@ -628,6 +765,8 @@ fn move_stroke(state: &mut State, id: &str, point: Point) {
                 &state.ctx,
                 state.board_width,
                 state.board_height,
+                state.pan_x,
+                state.pan_y,
                 from,
                 to,
                 &color,

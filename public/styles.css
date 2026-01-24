@@ -151,21 +151,24 @@ body {
   letter-spacing: 0.02em;
 }
 
-.tool {
+.button-base {
   padding: 10px 10px;
   border-radius: 12px;
-  border: 1px solid rgba(35, 45, 65, 0.2);
-  background: rgba(255, 255, 255, 0.6);
-  color: var(--ink);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   cursor: pointer;
-  /* transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease; */
   transition: transform 0.2s ease, box-shadow 0.2s ease;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.tool {
+  border: 1px solid rgba(35, 45, 65, 0.2);
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--ink);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
 }
 
 .tool:hover {
@@ -180,19 +183,9 @@ body {
 }
 
 .clear {
-  padding: 10px 10px;
-  border-radius: 12px;
   border: none;
   background: var(--accent);
   color: #fff;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .clear:hover {
