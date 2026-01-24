@@ -193,6 +193,7 @@ pub fn run() -> Result<(), JsValue> {
                 }
                 ServerMessage::StrokeRemove { id } => {
                     remove_stroke(&mut state, &id);
+                    redraw(&mut state);
                 }
                 ServerMessage::StrokeRestore { stroke } => {
                     restore_stroke(&mut state, stroke);
@@ -237,6 +238,7 @@ pub fn run() -> Result<(), JsValue> {
                         }
                         state.selected_ids.clear();
                         state.selection_mode = SelectionMode::None;
+                        redraw(&mut state);
                         ids
                     };
                     send_message(&key_socket, &ClientMessage::Remove { ids });
