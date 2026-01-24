@@ -70,6 +70,7 @@ struct State {
     strokes: Vec<Stroke>,
     active_ids: HashSet<String>,
     load_reader: Option<FileReader>,
+    load_onload: Option<Closure<dyn FnMut(ProgressEvent)>>,
     board_width: f64,
     board_height: f64,
     board_scale: f64,
@@ -143,6 +144,7 @@ pub fn run() -> Result<(), JsValue> {
         strokes: Vec::new(),
         active_ids: HashSet::new(),
         load_reader: None,
+        load_onload: None,
         board_width: 0.0,
         board_height: 0.0,
         board_scale: 0.0,
@@ -552,14 +554,9 @@ pub fn run() -> Result<(), JsValue> {
     }
 
     {
-        let load_state = state.clone();
-        let load_socket = socket.clone();
-        let onload = std::rc::Rc::new(RefCell::new(None));
-        let onload_clone = onload.clone();
-        let load_state_onload = load_state.clone();
-        let load_socket_onload = load_socket.clone();
-        *onload.borrow_mut() = Some(Closure::<dyn FnMut(ProgressEvent)>::new(
-            move |event: ProgressEvent| {
+        let load_state_onload = state.clone();
+        let load_socket_onload = socket.clone();
+        let onload = Closure::<dyn FnMut(ProgressEvent)>::new(move |event: ProgressEvent| {
             let target = match event.target() {
                 Some(target) => target,
                 None => return,
@@ -583,11 +580,11 @@ pub fn run() -> Result<(), JsValue> {
                 state.load_reader = None;
             }
             send_message(&load_socket_onload, &ClientMessage::Load { strokes });
-        },
-        ));
+        });
+        state.borrow_mut().load_onload = Some(onload);
 
         let load_file_cb = load_file.clone();
-        let load_state_onchange = load_state.clone();
+        let load_state_onchange = state.clone();
         let onchange = Closure::<dyn FnMut(Event)>::new(move |_| {
             let files = load_file_cb.files();
             let file = files.and_then(|list| list.get(0));
@@ -598,7 +595,7 @@ pub fn run() -> Result<(), JsValue> {
                 Ok(reader) => reader,
                 Err(_) => return,
             };
-            if let Some(handler) = onload_clone.borrow().as_ref() {
+            if let Some(handler) = load_state_onchange.borrow().load_onload.as_ref() {
                 reader.set_onload(Some(handler.as_ref().unchecked_ref()));
             }
             let _ = reader.read_as_text(&file);
@@ -608,10 +605,6 @@ pub fn run() -> Result<(), JsValue> {
                 .replace(reader);
         });
         load_file.add_event_listener_with_callback("change", onchange.as_ref().unchecked_ref())?;
-        let handler = onload.borrow_mut().take();
-        if let Some(handler) = handler {
-            handler.forget();
-        }
         onchange.forget();
     }
 
