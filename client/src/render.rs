@@ -99,7 +99,7 @@ pub fn redraw(state: &mut State) {
 }
 
 pub fn draw_selection_overlay(state: &mut State) {
-    if state.selected_ids.is_empty() && state.lasso_points().is_empty() {
+    if state.selected_ids().is_empty() && state.lasso_points().is_empty() {
         return;
     }
     let ctx = &state.ctx;

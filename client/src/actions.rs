@@ -102,9 +102,9 @@ pub fn end_stroke(state: &mut State, id: &str) {
 pub fn clear_board(state: &mut State) {
     state.strokes.clear();
     state.active_ids.clear();
-    state.selected_ids.clear();
-    if matches!(&state.mode, Mode::Select(_)) {
-        state.mode = Mode::Select(SelectMode::Idle);
+    if let Mode::Select(select) = &mut state.mode {
+        select.selected_ids.clear();
+        select.mode = SelectMode::Idle;
     }
     redraw(state);
 }
@@ -185,9 +185,9 @@ pub fn adopt_strokes(state: &mut State, strokes: Vec<Stroke>) {
     }
     state.strokes = sanitized;
     state.active_ids.clear();
-    state.selected_ids.clear();
-    if matches!(&state.mode, Mode::Select(_)) {
-        state.mode = Mode::Select(SelectMode::Idle);
+    if let Mode::Select(select) = &mut state.mode {
+        select.selected_ids.clear();
+        select.mode = SelectMode::Idle;
     }
     redraw(state);
 }
@@ -207,8 +207,12 @@ pub fn last_point_for_id(strokes: &[Stroke], id: &str) -> Option<Point> {
 }
 
 pub fn finalize_lasso_selection(state: &mut State) {
-    let points = match &mut state.mode {
-        Mode::Select(SelectMode::Lasso { points }) => points,
+    let select = match &mut state.mode {
+        Mode::Select(select) => select,
+        _ => return,
+    };
+    let points = match &mut select.mode {
+        SelectMode::Lasso { points } => points,
         _ => return,
     };
     if points.len() < 3 {
@@ -229,5 +233,5 @@ pub fn finalize_lasso_selection(state: &mut State) {
             selected.push(stroke.id.clone());
         }
     }
-    state.selected_ids = selected;
+    select.selected_ids = selected;
 }

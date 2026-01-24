@@ -30,8 +30,8 @@ use crate::palette::{palette_action_from_event, render_palette, PaletteAction};
 use crate::persistence::{build_pdf_html, open_print_window, parse_load_payload, SaveData};
 use crate::render::redraw;
 use crate::state::{
-    DrawMode, EraseMode, Mode, PanMode, ScaleAxis, SelectMode, SelectionHit, State, Tool,
-    DEFAULT_PALETTE,
+    DrawMode, DrawState, EraseMode, Mode, PanMode, ScaleAxis, SelectMode, SelectState,
+    SelectionHit, State, Tool, DEFAULT_PALETTE,
 };
 use crate::util::make_id;
 
@@ -87,15 +87,16 @@ pub fn run() -> Result<(), JsValue> {
         zoom: 1.0,
         pan_x: 0.0,
         pan_y: 0.0,
-        selected_ids: Vec::new(),
         palette: DEFAULT_PALETTE
             .iter()
             .map(|value| value.to_string())
             .collect(),
-        palette_selected: Some(0),
         palette_last_selected: 0,
-        palette_add_mode: false,
-        mode: Mode::Draw(DrawMode::Idle),
+        mode: Mode::Draw(DrawState {
+            mode: DrawMode::Idle,
+            palette_selected: Some(0),
+            palette_add_mode: false,
+        }),
     }));
 
     update_size_label(&size_input, &size_value);
@@ -105,8 +106,8 @@ pub fn run() -> Result<(), JsValue> {
     set_tool_button(&pan_button, false);
     set_canvas_mode(&canvas, Tool::Draw, false);
     {
-        let state = state.borrow_mut();
-        if let Some(index) = state.palette_selected {
+        let state = state.borrow();
+        if let Some(index) = state.palette_selected() {
             if let Some(color) = state.palette.get(index).cloned() {
                 color_input.set_value(&color);
             }
@@ -115,7 +116,7 @@ pub fn run() -> Result<(), JsValue> {
             &document,
             &palette_el,
             &state.palette,
-            state.palette_selected,
+            state.palette_selected(),
         );
     }
 
@@ -224,16 +225,19 @@ pub fn run() -> Result<(), JsValue> {
                 if key == "Delete" || key == "Backspace" {
                     let ids = {
                         let mut state = key_state.borrow_mut();
-                        if state.selected_ids.is_empty() {
+                        let ids = match &state.mode {
+                            Mode::Select(select) => select.selected_ids.clone(),
+                            _ => return,
+                        };
+                        if ids.is_empty() {
                             return;
                         }
-                        let ids = state.selected_ids.clone();
                         for id in &ids {
                             remove_stroke(&mut state, id);
                         }
-                        state.selected_ids.clear();
-                        if matches!(&state.mode, Mode::Select(_)) {
-                            state.mode = Mode::Select(SelectMode::Idle);
+                        if let Mode::Select(select) = &mut state.mode {
+                            select.selected_ids.clear();
+                            select.mode = SelectMode::Idle;
                         }
                         redraw(&mut state);
                         ids
@@ -287,9 +291,6 @@ pub fn run() -> Result<(), JsValue> {
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = tool_state.borrow_mut();
             state.mode = Mode::Erase(EraseMode::Idle);
-            state.selected_ids.clear();
-            state.palette_selected = None;
-            state.palette_add_mode = false;
             let tool = state.tool();
             set_tool_button(&pan_button_cb, tool == Tool::Pan);
             set_tool_button(&eraser_button_cb, tool == Tool::Erase);
@@ -299,7 +300,7 @@ pub fn run() -> Result<(), JsValue> {
                 &document,
                 &palette_el_cb,
                 &state.palette,
-                state.palette_selected,
+                state.palette_selected(),
             );
         });
         eraser_button
@@ -316,10 +317,10 @@ pub fn run() -> Result<(), JsValue> {
         let document = document.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = tool_state.borrow_mut();
-            state.mode = Mode::Select(SelectMode::Idle);
-            state.selected_ids.clear();
-            state.palette_selected = None;
-            state.palette_add_mode = false;
+            state.mode = Mode::Select(SelectState {
+                selected_ids: Vec::new(),
+                mode: SelectMode::Idle,
+            });
             let tool = state.tool();
             set_tool_button(&eraser_button_cb, tool == Tool::Erase);
             set_tool_button(&pan_button_cb, tool == Tool::Pan);
@@ -329,7 +330,7 @@ pub fn run() -> Result<(), JsValue> {
                 &document,
                 &palette_el_cb,
                 &state.palette,
-                state.palette_selected,
+                state.palette_selected(),
             );
         });
         lasso_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
@@ -351,29 +352,25 @@ pub fn run() -> Result<(), JsValue> {
             } else {
                 Tool::Pan
             };
-            state.mode = match next_tool {
-                Tool::Draw => Mode::Draw(DrawMode::Idle),
-                Tool::Pan => Mode::Pan(PanMode::Idle),
-                Tool::Erase => Mode::Erase(EraseMode::Idle),
-                Tool::Select => Mode::Select(SelectMode::Idle),
-            };
-            state.selected_ids.clear();
             if next_tool == Tool::Draw {
-                state.palette_add_mode = false;
                 if state.palette_last_selected >= state.palette.len() {
                     state.palette_last_selected = 0;
                 }
-                if state.palette.is_empty() {
-                    state.palette_selected = None;
+                let palette_selected = if state.palette.is_empty() {
+                    None
                 } else {
-                    state.palette_selected = Some(state.palette_last_selected);
                     if let Some(color) = state.palette.get(state.palette_last_selected).cloned() {
                         color_input_cb.set_value(&color);
                     }
-                }
+                    Some(state.palette_last_selected)
+                };
+                state.mode = Mode::Draw(DrawState {
+                    mode: DrawMode::Idle,
+                    palette_selected,
+                    palette_add_mode: false,
+                });
             } else {
-                state.palette_selected = None;
-                state.palette_add_mode = false;
+                state.mode = Mode::Pan(PanMode::Idle);
             }
             set_tool_button(&eraser_button_cb, next_tool == Tool::Erase);
             set_tool_button(&pan_button_cb, next_tool == Tool::Pan);
@@ -383,7 +380,7 @@ pub fn run() -> Result<(), JsValue> {
                 &document,
                 &palette_el_cb,
                 &state.palette,
-                state.palette_selected,
+                state.palette_selected(),
             );
         });
         pan_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
@@ -405,20 +402,22 @@ pub fn run() -> Result<(), JsValue> {
                 None => return,
             };
             let mut state = palette_state.borrow_mut();
-            state.mode = Mode::Draw(DrawMode::Idle);
-            state.selected_ids.clear();
             set_tool_button(&eraser_button_cb, false);
             set_tool_button(&pan_button_cb, false);
             set_tool_button(&lasso_button_cb, false);
             set_canvas_mode(&state.canvas, Tool::Draw, false);
             match action {
                 PaletteAction::Add => {
-                    state.palette_add_mode = true;
+                    state.mode = Mode::Draw(DrawState {
+                        mode: DrawMode::Idle,
+                        palette_selected: state.palette_selected(),
+                        palette_add_mode: true,
+                    });
                     render_palette(
                         &document,
                         &palette_el_cb,
                         &state.palette,
-                        state.palette_selected,
+                        state.palette_selected(),
                     );
                     color_input.click();
                 }
@@ -426,16 +425,20 @@ pub fn run() -> Result<(), JsValue> {
                     if index >= state.palette.len() {
                         return;
                     }
-                    let already_selected = state.palette_selected == Some(index);
+                    let already_selected = state.palette_selected() == Some(index);
                     if already_selected && state.tool() == Tool::Draw {
-                        state.palette_add_mode = false;
+                        if let Mode::Draw(draw) = &mut state.mode {
+                            draw.palette_add_mode = false;
+                        }
                         color_input.click();
                         return;
                     }
-                    state.mode = Mode::Draw(DrawMode::Idle);
-                    state.palette_selected = Some(index);
                     state.palette_last_selected = index;
-                    state.palette_add_mode = false;
+                    state.mode = Mode::Draw(DrawState {
+                        mode: DrawMode::Idle,
+                        palette_selected: Some(index),
+                        palette_add_mode: false,
+                    });
                     if let Some(color) = state.palette.get(index).cloned() {
                         color_input.set_value(&color);
                     }
@@ -443,7 +446,7 @@ pub fn run() -> Result<(), JsValue> {
                         &document,
                         &palette_el_cb,
                         &state.palette,
-                        state.palette_selected,
+                        state.palette_selected(),
                     );
                 }
             }
@@ -462,27 +465,39 @@ pub fn run() -> Result<(), JsValue> {
         let oninput = Closure::<dyn FnMut(Event)>::new(move |_| {
             let color = color_input_cb.value();
             let mut state = palette_state.borrow_mut();
-            if state.palette_add_mode {
+            let add_mode = match &state.mode {
+                Mode::Draw(draw) => draw.palette_add_mode,
+                _ => return,
+            };
+            if add_mode {
                 state.palette.push(color);
-                state.palette_selected = state.palette.len().checked_sub(1);
-                if let Some(index) = state.palette_selected {
-                    state.palette_last_selected = index;
+                let index = state.palette.len().saturating_sub(1);
+                state.palette_last_selected = index;
+                if let Mode::Draw(draw) = &mut state.mode {
+                    draw.palette_selected = Some(index);
+                    draw.palette_add_mode = false;
                 }
-                state.palette_add_mode = false;
             } else {
-                let mut selected = state
-                    .palette_selected
-                    .unwrap_or(state.palette_last_selected);
+                let mut selected = match &state.mode {
+                    Mode::Draw(draw) => draw.palette_selected,
+                    _ => None,
+                }
+                .unwrap_or(state.palette_last_selected);
                 if state.palette.is_empty() {
-                    state.palette_selected = None;
+                    if let Mode::Draw(draw) = &mut state.mode {
+                        draw.palette_selected = None;
+                    }
                 } else {
                     if selected >= state.palette.len() {
                         selected = 0;
                     }
-                    state.palette_selected = Some(selected);
-                    state.palette_last_selected = selected;
                     if let Some(entry) = state.palette.get_mut(selected) {
                         *entry = color;
+                    }
+                    state.palette_last_selected = selected;
+                    if let Mode::Draw(draw) = &mut state.mode {
+                        draw.palette_selected = Some(selected);
+                        draw.palette_add_mode = false;
                     }
                 }
             }
@@ -490,7 +505,7 @@ pub fn run() -> Result<(), JsValue> {
                 &document,
                 &palette_el_cb,
                 &state.palette,
-                state.palette_selected,
+                state.palette_selected(),
             );
         });
         color_input_listener
@@ -703,34 +718,60 @@ pub fn run() -> Result<(), JsValue> {
                     Some(point) => point,
                     None => return,
                 };
+                let hit = {
+                    let state = down_state.borrow();
+                    selection_hit_test(&state, screen_x, screen_y)
+                };
+                let selection_ids = {
+                    let state = down_state.borrow();
+                    state.selected_ids().to_vec()
+                };
+                let snapshot = {
+                    let state = down_state.borrow();
+                    selected_strokes(&state)
+                };
+                let center = {
+                    let state = down_state.borrow();
+                    selection_center(&state)
+                };
                 let mut state = down_state.borrow_mut();
-                if let Some(hit) = selection_hit_test(&state, screen_x, screen_y) {
+                if !matches!(&state.mode, Mode::Select(_)) {
+                    state.mode = Mode::Select(SelectState {
+                        selected_ids: Vec::new(),
+                        mode: SelectMode::Idle,
+                    });
+                }
+                if let Some(hit) = hit {
                     match hit {
                         SelectionHit::Trash => {
-                            let ids = state.selected_ids.clone();
+                            let ids = selection_ids;
                             for id in &ids {
                                 remove_stroke(&mut state, id);
                             }
-                            state.selected_ids.clear();
-                            state.mode = Mode::Select(SelectMode::Idle);
+                            if let Mode::Select(select) = &mut state.mode {
+                                select.selected_ids.clear();
+                                select.mode = SelectMode::Idle;
+                            }
                             redraw(&mut state);
                             send_message(&down_socket, &ClientMessage::Remove { ids });
                             return;
                         }
                         SelectionHit::Rotate => {
-                            if let Some(center) = selection_center(&state) {
-                                let snapshot = selected_strokes(&state);
-                                state.mode = Mode::Select(SelectMode::Rotate {
-                                    center,
-                                    start_angle: angle_between(center, world_point),
-                                    snapshot,
-                                });
-                                let ids = state.selected_ids.clone();
-                                if !ids.is_empty() {
-                                    send_message(
-                                        &down_socket,
-                                        &ClientMessage::TransformStart { ids },
-                                    );
+                            if let Some(center) = center {
+                                let snapshot = snapshot.clone();
+                                if let Mode::Select(select) = &mut state.mode {
+                                    select.mode = SelectMode::Rotate {
+                                        center,
+                                        start_angle: angle_between(center, world_point),
+                                        snapshot,
+                                    };
+                                    let ids = selection_ids.clone();
+                                    if !ids.is_empty() {
+                                        send_message(
+                                            &down_socket,
+                                            &ClientMessage::TransformStart { ids },
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -738,41 +779,47 @@ pub fn run() -> Result<(), JsValue> {
                             let dx = (world_point.x - handle.anchor.x) as f64;
                             let dy = (world_point.y - handle.anchor.y) as f64;
                             if dx.abs() > f64::EPSILON || dy.abs() > f64::EPSILON {
-                                let snapshot = selected_strokes(&state);
-                                state.mode = Mode::Select(SelectMode::Scale {
-                                    anchor: handle.anchor,
-                                    start: world_point,
-                                    axis: handle.axis,
-                                    snapshot,
-                                });
-                                let ids = state.selected_ids.clone();
-                                if !ids.is_empty() {
-                                    send_message(
-                                        &down_socket,
-                                        &ClientMessage::TransformStart { ids },
-                                    );
+                                let snapshot = snapshot.clone();
+                                if let Mode::Select(select) = &mut state.mode {
+                                    select.mode = SelectMode::Scale {
+                                        anchor: handle.anchor,
+                                        start: world_point,
+                                        axis: handle.axis,
+                                        snapshot,
+                                    };
+                                    let ids = selection_ids.clone();
+                                    if !ids.is_empty() {
+                                        send_message(
+                                            &down_socket,
+                                            &ClientMessage::TransformStart { ids },
+                                        );
+                                    }
                                 }
                             }
                         }
                         SelectionHit::Move => {
-                            let snapshot = selected_strokes(&state);
-                            state.mode = Mode::Select(SelectMode::Move {
-                                start: world_point,
-                                snapshot,
-                            });
-                            let ids = state.selected_ids.clone();
-                            if !ids.is_empty() {
-                                send_message(&down_socket, &ClientMessage::TransformStart { ids });
+                            let snapshot = snapshot.clone();
+                            if let Mode::Select(select) = &mut state.mode {
+                                select.mode = SelectMode::Move {
+                                    start: world_point,
+                                    snapshot,
+                                };
+                                let ids = selection_ids.clone();
+                                if !ids.is_empty() {
+                                    send_message(&down_socket, &ClientMessage::TransformStart { ids });
+                                }
                             }
                         }
                     }
                     let _ = down_canvas.set_pointer_capture(event.pointer_id());
                     return;
                 }
-                state.selected_ids.clear();
-                state.mode = Mode::Select(SelectMode::Lasso {
-                    points: vec![world_point],
-                });
+                if let Mode::Select(select) = &mut state.mode {
+                    select.selected_ids.clear();
+                    select.mode = SelectMode::Lasso {
+                        points: vec![world_point],
+                    };
+                }
                 redraw(&mut state);
                 let _ = down_canvas.set_pointer_capture(event.pointer_id());
                 return;
@@ -831,7 +878,9 @@ pub fn run() -> Result<(), JsValue> {
 
             {
                 let mut state = down_state.borrow_mut();
-                state.mode = Mode::Draw(DrawMode::Drawing { id: id.clone() });
+                if let Mode::Draw(draw) = &mut state.mode {
+                    draw.mode = DrawMode::Drawing { id: id.clone() };
+                }
                 start_stroke(&mut state, id.clone(), color.clone(), size, point);
             }
 
@@ -867,7 +916,7 @@ pub fn run() -> Result<(), JsValue> {
             };
             let mut state = move_state.borrow_mut();
             match &mut state.mode {
-                Mode::Select(select_mode) => {
+                Mode::Select(select) => {
                     let rect = move_canvas.get_bounding_client_rect();
                     let screen_x = event.client_x() as f64 - rect.left();
                     let screen_y = event.client_y() as f64 - rect.top();
@@ -883,7 +932,7 @@ pub fn run() -> Result<(), JsValue> {
                         Some(point) => point,
                         None => return,
                     };
-                    match select_mode {
+                    match &mut select.mode {
                         SelectMode::Lasso { points } => {
                             points.push(world_point);
                             redraw(&mut state);
@@ -980,7 +1029,11 @@ pub fn run() -> Result<(), JsValue> {
                     state.pan_y = next_pan_y;
                     redraw(&mut state);
                 }
-                Mode::Draw(DrawMode::Drawing { id }) => {
+                Mode::Draw(draw) => {
+                    let id = match &draw.mode {
+                        DrawMode::Drawing { id } => id.clone(),
+                        _ => return,
+                    };
                     let point = match event_to_point(
                         &move_canvas,
                         &event,
@@ -993,7 +1046,6 @@ pub fn run() -> Result<(), JsValue> {
                         Some(point) => point,
                         None => return,
                     };
-                    let id = id.clone();
                     if let Some(last_point) = last_point_for_id(&state.strokes, &id) {
                         if last_point == point {
                             return;
@@ -1020,7 +1072,10 @@ pub fn run() -> Result<(), JsValue> {
                 Mode::Select(_)
                     | Mode::Erase(EraseMode::Active { .. })
                     | Mode::Pan(PanMode::Active { .. })
-                    | Mode::Draw(DrawMode::Drawing { .. })
+                    | Mode::Draw(DrawState {
+                        mode: DrawMode::Drawing { .. },
+                        ..
+                    })
             );
             if !active {
                 return;
@@ -1029,19 +1084,20 @@ pub fn run() -> Result<(), JsValue> {
             if stop_canvas.has_pointer_capture(event.pointer_id()) {
                 let _ = stop_canvas.release_pointer_capture(event.pointer_id());
             }
-            let selected_ids = state.selected_ids.clone();
             match &mut state.mode {
-                Mode::Select(select_mode) => {
-                    let end_ids = match select_mode {
+                Mode::Select(select) => {
+                    let end_ids = match select.mode {
                         SelectMode::Move { .. }
                         | SelectMode::Scale { .. }
-                        | SelectMode::Rotate { .. } => Some(selected_ids),
+                        | SelectMode::Rotate { .. } => Some(select.selected_ids.clone()),
                         _ => None,
                     };
-                    if matches!(select_mode, SelectMode::Lasso { .. }) {
+                    if matches!(select.mode, SelectMode::Lasso { .. }) {
                         finalize_lasso_selection(&mut state);
                     }
-                    state.mode = Mode::Select(SelectMode::Idle);
+                    if let Mode::Select(select) = &mut state.mode {
+                        select.mode = SelectMode::Idle;
+                    }
                     redraw(&mut state);
                     drop(state);
                     if let Some(ids) = end_ids {
@@ -1057,9 +1113,12 @@ pub fn run() -> Result<(), JsValue> {
                     state.mode = Mode::Pan(PanMode::Idle);
                     set_canvas_mode(&state.canvas, Tool::Pan, false);
                 }
-                Mode::Draw(DrawMode::Drawing { id }) => {
-                    let id = id.clone();
-                    state.mode = Mode::Draw(DrawMode::Idle);
+                Mode::Draw(draw) => {
+                    let id = match &draw.mode {
+                        DrawMode::Drawing { id } => id.clone(),
+                        _ => return,
+                    };
+                    draw.mode = DrawMode::Idle;
                     end_stroke(&mut state, &id);
                     drop(state);
                     send_message(&stop_socket, &ClientMessage::StrokeEnd { id });

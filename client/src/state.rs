@@ -16,13 +16,6 @@ pub enum Tool {
     Select,
 }
 
-pub enum SelectionHit {
-    Move,
-    Scale(ScaleHandle),
-    Rotate,
-    Trash,
-}
-
 #[derive(Clone, Copy)]
 pub enum ScaleAxis {
     Both,
@@ -36,9 +29,22 @@ pub struct ScaleHandle {
     pub anchor: Point,
 }
 
+pub enum SelectionHit {
+    Move,
+    Scale(ScaleHandle),
+    Rotate,
+    Trash,
+}
+
 pub enum DrawMode {
     Idle,
     Drawing { id: String },
+}
+
+pub struct DrawState {
+    pub mode: DrawMode,
+    pub palette_selected: Option<usize>,
+    pub palette_add_mode: bool,
 }
 
 pub enum EraseMode {
@@ -73,11 +79,16 @@ pub enum SelectMode {
     },
 }
 
+pub struct SelectState {
+    pub selected_ids: Vec<String>,
+    pub mode: SelectMode,
+}
+
 pub enum Mode {
-    Draw(DrawMode),
+    Draw(DrawState),
     Erase(EraseMode),
     Pan(PanMode),
-    Select(SelectMode),
+    Select(SelectState),
 }
 
 pub struct State {
@@ -94,11 +105,8 @@ pub struct State {
     pub zoom: f64,
     pub pan_x: f64,
     pub pan_y: f64,
-    pub selected_ids: Vec<String>,
     pub palette: Vec<String>,
-    pub palette_selected: Option<usize>,
     pub palette_last_selected: usize,
-    pub palette_add_mode: bool,
     pub mode: Mode,
 }
 
@@ -118,10 +126,28 @@ impl State {
         self.mode.tool()
     }
 
+    pub fn palette_selected(&self) -> Option<usize> {
+        match &self.mode {
+            Mode::Draw(draw) => draw.palette_selected,
+            _ => None,
+        }
+    }
+
     pub fn lasso_points(&self) -> &[Point] {
         match &self.mode {
-            Mode::Select(SelectMode::Lasso { points }) => points,
+            Mode::Select(select) => match &select.mode {
+                SelectMode::Lasso { points } => points,
+                _ => &[],
+            },
             _ => &[],
         }
     }
+
+    pub fn selected_ids(&self) -> &[String] {
+        match &self.mode {
+            Mode::Select(select) => &select.selected_ids,
+            _ => &[],
+        }
+    }
+
 }

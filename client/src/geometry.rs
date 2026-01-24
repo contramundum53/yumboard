@@ -23,7 +23,7 @@ pub fn world_to_screen(state: &State, point: Point) -> (f64, f64) {
 }
 
 pub fn selection_bounds(state: &State) -> Option<Bounds> {
-    if state.selected_ids.is_empty() {
+    if state.selected_ids().is_empty() {
         return None;
     }
     let mut min_x = f64::MAX;
@@ -31,7 +31,7 @@ pub fn selection_bounds(state: &State) -> Option<Bounds> {
     let mut max_x = f64::MIN;
     let mut max_y = f64::MIN;
     for stroke in &state.strokes {
-        if !state.selected_ids.iter().any(|id| id == &stroke.id) {
+        if !state.selected_ids().iter().any(|id| id == &stroke.id) {
             continue;
         }
         for point in &stroke.points {
@@ -187,7 +187,7 @@ pub fn selected_strokes(state: &State) -> Vec<Stroke> {
     state
         .strokes
         .iter()
-        .filter(|stroke| state.selected_ids.iter().any(|id| id == &stroke.id))
+        .filter(|stroke| state.selected_ids().iter().any(|id| id == &stroke.id))
         .cloned()
         .collect()
 }
