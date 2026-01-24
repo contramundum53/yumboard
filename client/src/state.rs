@@ -35,8 +35,7 @@ pub enum DrawMode {
 
 pub struct DrawState {
     pub mode: DrawMode,
-    pub palette_selected: Option<usize>,
-    pub palette_add_mode: bool,
+    pub palette_selected: usize,
 }
 
 pub enum EraseMode {
@@ -98,7 +97,6 @@ pub struct State {
     pub pan_x: f64,
     pub pan_y: f64,
     pub palette: Vec<String>,
-    pub palette_last_selected: usize,
     pub mode: Mode,
 }
 

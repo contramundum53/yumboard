@@ -37,7 +37,7 @@ use crate::util::make_id;
 
 fn palette_selected(mode: &Mode) -> Option<usize> {
     match mode {
-        Mode::Draw(draw) => draw.palette_selected,
+        Mode::Draw(draw) => Some(draw.palette_selected),
         _ => None,
     }
 }
@@ -114,11 +114,9 @@ pub fn run() -> Result<(), JsValue> {
             .iter()
             .map(|value| value.to_string())
             .collect(),
-        palette_last_selected: 0,
         mode: Mode::Draw(DrawState {
             mode: DrawMode::Idle,
-            palette_selected: Some(0),
-            palette_add_mode: false,
+            palette_selected: 0,
         }),
     }));
 
@@ -359,31 +357,10 @@ pub fn run() -> Result<(), JsValue> {
         let pan_button_cb = pan_button.clone();
         let lasso_button_cb = lasso_button.clone();
         let palette_el_cb = palette_el.clone();
-        let color_input_cb = color_input.clone();
         let document = document.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = tool_state.borrow_mut();
-            let going_to_pan = !matches!(state.mode, Mode::Pan(_));
-            if !going_to_pan {
-                if state.palette_last_selected >= state.palette.len() {
-                    state.palette_last_selected = 0;
-                }
-                let palette_selected = if state.palette.is_empty() {
-                    None
-                } else {
-                    if let Some(color) = state.palette.get(state.palette_last_selected).cloned() {
-                        color_input_cb.set_value(&color);
-                    }
-                    Some(state.palette_last_selected)
-                };
-                state.mode = Mode::Draw(DrawState {
-                    mode: DrawMode::Idle,
-                    palette_selected,
-                    palette_add_mode: false,
-                });
-            } else {
-                state.mode = Mode::Pan(PanMode::Idle);
-            }
+            state.mode = Mode::Pan(PanMode::Idle);
             sync_tool_ui(&state, &pan_button_cb, &eraser_button_cb, &lasso_button_cb, false);
             render_palette(
                 &document,
@@ -411,27 +388,28 @@ pub fn run() -> Result<(), JsValue> {
                 None => return,
             };
             let mut state = palette_state.borrow_mut();
-            if !matches!(state.mode, Mode::Draw(_)) {
-                state.mode = Mode::Draw(DrawState {
-                    mode: DrawMode::Idle,
-                    palette_selected: None,
-                    palette_add_mode: false,
-                });
-            }
-            sync_tool_ui(&state, &pan_button_cb, &eraser_button_cb, &lasso_button_cb, false);
             match action {
                 PaletteAction::Add => {
-                    let palette_selected = palette_selected(&state.mode);
+                    let color = color_input.value();
+                    state.palette.push(color.clone());
+                    let palette_selected = state.palette.len().saturating_sub(1);
                     state.mode = Mode::Draw(DrawState {
                         mode: DrawMode::Idle,
                         palette_selected,
-                        palette_add_mode: true,
                     });
+                    color_input.set_value(&color);
+                    sync_tool_ui(
+                        &state,
+                        &pan_button_cb,
+                        &eraser_button_cb,
+                        &lasso_button_cb,
+                        false,
+                    );
                     render_palette(
                         &document,
                         &palette_el_cb,
                         &state.palette,
-                        palette_selected,
+                        Some(palette_selected),
                     );
                     color_input.click();
                 }
@@ -440,28 +418,29 @@ pub fn run() -> Result<(), JsValue> {
                         return;
                     }
                     let already_selected = palette_selected(&state.mode) == Some(index);
-                    if already_selected {
-                        if let Mode::Draw(draw) = &mut state.mode {
-                            draw.palette_add_mode = false;
-                        }
-                        color_input.click();
-                        return;
-                    }
-                    state.palette_last_selected = index;
                     state.mode = Mode::Draw(DrawState {
                         mode: DrawMode::Idle,
-                        palette_selected: Some(index),
-                        palette_add_mode: false,
+                        palette_selected: index,
                     });
                     if let Some(color) = state.palette.get(index).cloned() {
                         color_input.set_value(&color);
                     }
+                    sync_tool_ui(
+                        &state,
+                        &pan_button_cb,
+                        &eraser_button_cb,
+                        &lasso_button_cb,
+                        false,
+                    );
                     render_palette(
                         &document,
                         &palette_el_cb,
                         &state.palette,
                         Some(index),
                     );
+                    if already_selected {
+                        color_input.click();
+                    }
                 }
             }
         });
@@ -479,38 +458,14 @@ pub fn run() -> Result<(), JsValue> {
         let oninput = Closure::<dyn FnMut(Event)>::new(move |_| {
             let color = color_input_cb.value();
             let mut state = palette_state.borrow_mut();
-            let add_mode = match &state.mode {
-                Mode::Draw(draw) => draw.palette_add_mode,
+            let selected = match &state.mode {
+                Mode::Draw(draw) => draw.palette_selected,
                 _ => return,
             };
-            if add_mode {
-                state.palette.push(color);
-                let index = state.palette.len().saturating_sub(1);
-                state.palette_last_selected = index;
-                if let Mode::Draw(draw) = &mut state.mode {
-                    draw.palette_selected = Some(index);
-                    draw.palette_add_mode = false;
-                }
+            if let Some(entry) = state.palette.get_mut(selected) {
+                *entry = color;
             } else {
-                let mut selected =
-                    palette_selected(&state.mode).unwrap_or(state.palette_last_selected);
-                if state.palette.is_empty() {
-                    if let Mode::Draw(draw) = &mut state.mode {
-                        draw.palette_selected = None;
-                    }
-                } else {
-                    if selected >= state.palette.len() {
-                        selected = 0;
-                    }
-                    if let Some(entry) = state.palette.get_mut(selected) {
-                        *entry = color;
-                    }
-                    state.palette_last_selected = selected;
-                    if let Mode::Draw(draw) = &mut state.mode {
-                        draw.palette_selected = Some(selected);
-                        draw.palette_add_mode = false;
-                    }
-                }
+                return;
             }
             render_palette(
                 &document,
