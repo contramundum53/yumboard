@@ -103,10 +103,4 @@ pub struct State {
 }
 
 impl State {
-    pub fn palette_selected(&self) -> Option<usize> {
-        match &self.mode {
-            Mode::Draw(draw) => draw.palette_selected,
-            _ => None,
-        }
-    }
 }

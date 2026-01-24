@@ -107,7 +107,11 @@ pub fn run() -> Result<(), JsValue> {
     set_canvas_mode(&canvas, &state.borrow().mode, false);
     {
         let state = state.borrow();
-        if let Some(index) = state.palette_selected() {
+        let selected = match &state.mode {
+            Mode::Draw(draw) => draw.palette_selected,
+            _ => None,
+        };
+        if let Some(index) = selected {
             if let Some(color) = state.palette.get(index).cloned() {
                 color_input.set_value(&color);
             }
@@ -116,7 +120,7 @@ pub fn run() -> Result<(), JsValue> {
             &document,
             &palette_el,
             &state.palette,
-            state.palette_selected(),
+            selected,
         );
     }
 
@@ -298,11 +302,15 @@ pub fn run() -> Result<(), JsValue> {
             set_tool_button(&eraser_button_cb, is_erase);
             set_tool_button(&lasso_button_cb, is_select);
             set_canvas_mode(&state.canvas, &state.mode, false);
+            let selected = match &state.mode {
+                Mode::Draw(draw) => draw.palette_selected,
+                _ => None,
+            };
             render_palette(
                 &document,
                 &palette_el_cb,
                 &state.palette,
-                state.palette_selected(),
+                selected,
             );
         });
         eraser_button
@@ -330,11 +338,15 @@ pub fn run() -> Result<(), JsValue> {
             set_tool_button(&pan_button_cb, is_pan);
             set_tool_button(&lasso_button_cb, is_select);
             set_canvas_mode(&state.canvas, &state.mode, false);
+            let selected = match &state.mode {
+                Mode::Draw(draw) => draw.palette_selected,
+                _ => None,
+            };
             render_palette(
                 &document,
                 &palette_el_cb,
                 &state.palette,
-                state.palette_selected(),
+                selected,
             );
         });
         lasso_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
@@ -379,11 +391,15 @@ pub fn run() -> Result<(), JsValue> {
             set_tool_button(&pan_button_cb, is_pan);
             set_tool_button(&lasso_button_cb, is_select);
             set_canvas_mode(&state.canvas, &state.mode, false);
+            let selected = match &state.mode {
+                Mode::Draw(draw) => draw.palette_selected,
+                _ => None,
+            };
             render_palette(
                 &document,
                 &palette_el_cb,
                 &state.palette,
-                state.palette_selected(),
+                selected,
             );
         });
         pan_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
@@ -406,9 +422,13 @@ pub fn run() -> Result<(), JsValue> {
             };
             let mut state = palette_state.borrow_mut();
             if !matches!(state.mode, Mode::Draw(_)) {
+                let palette_selected = match &state.mode {
+                    Mode::Draw(draw) => draw.palette_selected,
+                    _ => None,
+                };
                 state.mode = Mode::Draw(DrawState {
                     mode: DrawMode::Idle,
-                    palette_selected: state.palette_selected(),
+                    palette_selected,
                     palette_add_mode: false,
                 });
             }
@@ -418,16 +438,20 @@ pub fn run() -> Result<(), JsValue> {
             set_canvas_mode(&state.canvas, &state.mode, false);
             match action {
                 PaletteAction::Add => {
+                    let palette_selected = match &state.mode {
+                        Mode::Draw(draw) => draw.palette_selected,
+                        _ => None,
+                    };
                     state.mode = Mode::Draw(DrawState {
                         mode: DrawMode::Idle,
-                        palette_selected: state.palette_selected(),
+                        palette_selected,
                         palette_add_mode: true,
                     });
                     render_palette(
                         &document,
                         &palette_el_cb,
                         &state.palette,
-                        state.palette_selected(),
+                        palette_selected,
                     );
                     color_input.click();
                 }
@@ -435,7 +459,11 @@ pub fn run() -> Result<(), JsValue> {
                     if index >= state.palette.len() {
                         return;
                     }
-                    let already_selected = state.palette_selected() == Some(index);
+                    let current_selected = match &state.mode {
+                        Mode::Draw(draw) => draw.palette_selected,
+                        _ => None,
+                    };
+                    let already_selected = current_selected == Some(index);
                     if already_selected && matches!(state.mode, Mode::Draw(_)) {
                         if let Mode::Draw(draw) = &mut state.mode {
                             draw.palette_add_mode = false;
@@ -456,7 +484,7 @@ pub fn run() -> Result<(), JsValue> {
                         &document,
                         &palette_el_cb,
                         &state.palette,
-                        state.palette_selected(),
+                        Some(index),
                     );
                 }
             }
@@ -515,7 +543,10 @@ pub fn run() -> Result<(), JsValue> {
                 &document,
                 &palette_el_cb,
                 &state.palette,
-                state.palette_selected(),
+                match &state.mode {
+                    Mode::Draw(draw) => draw.palette_selected,
+                    _ => None,
+                },
             );
         });
         color_input_listener
@@ -837,7 +868,10 @@ pub fn run() -> Result<(), JsValue> {
                                 };
                                 let ids = selection_ids.clone();
                                 if !ids.is_empty() {
-                                    send_message(&down_socket, &ClientMessage::TransformStart { ids });
+                                    send_message(
+                                        &down_socket,
+                                        &ClientMessage::TransformStart { ids },
+                                    );
                                 }
                             }
                         }
@@ -981,7 +1015,10 @@ pub fn run() -> Result<(), JsValue> {
                             let updated = apply_translation(snapshot, delta_x, delta_y);
                             apply_transformed_strokes(&mut state, &updated);
                             for stroke in updated {
-                                send_message(&move_socket, &ClientMessage::StrokeReplace { stroke });
+                                send_message(
+                                    &move_socket,
+                                    &ClientMessage::StrokeReplace { stroke },
+                                );
                             }
                         }
                         SelectMode::Scale {
@@ -1014,7 +1051,10 @@ pub fn run() -> Result<(), JsValue> {
                             let updated = apply_scale_xy(snapshot, *anchor, sx, sy);
                             apply_transformed_strokes(&mut state, &updated);
                             for stroke in updated {
-                                send_message(&move_socket, &ClientMessage::StrokeReplace { stroke });
+                                send_message(
+                                    &move_socket,
+                                    &ClientMessage::StrokeReplace { stroke },
+                                );
                             }
                         }
                         SelectMode::Rotate {
@@ -1027,7 +1067,10 @@ pub fn run() -> Result<(), JsValue> {
                             let updated = apply_rotation(snapshot, *center, delta);
                             apply_transformed_strokes(&mut state, &updated);
                             for stroke in updated {
-                                send_message(&move_socket, &ClientMessage::StrokeReplace { stroke });
+                                send_message(
+                                    &move_socket,
+                                    &ClientMessage::StrokeReplace { stroke },
+                                );
                             }
                         }
                         SelectMode::Idle => {
