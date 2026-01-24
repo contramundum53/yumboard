@@ -12,6 +12,7 @@ pub fn apply_client_message(
     sender: Uuid,
     message: ClientMessage,
 ) -> Option<(Vec<ServerMessage>, bool)> {
+    session.dirty = true;
     match message {
         ClientMessage::StrokeStart {
             id,
@@ -43,7 +44,6 @@ pub fn apply_client_message(
             }
             session.active_ids.insert(id.clone());
             session.owners.insert(id.clone(), sender);
-            session.dirty = true;
 
             Some((
                 vec![ServerMessage::StrokeStart {
@@ -66,7 +66,6 @@ pub fn apply_client_message(
             if let Some(stroke) = session.strokes.iter_mut().find(|stroke| stroke.id == id) {
                 if stroke.points.len() < MAX_POINTS_PER_STROKE {
                     stroke.points.push(point);
-                    session.dirty = true;
 
                     return Some((vec![ServerMessage::StrokeMove { id, point }], false));
                 }
@@ -100,7 +99,6 @@ pub fn apply_client_message(
             session.active_ids.clear();
             session.owners.clear();
             session.transform_sessions.clear();
-            session.dirty = true;
 
             if let Some(history) = session.histories.get_mut(&sender) {
                 history.undo.push(Action::Clear { strokes: cleared });
@@ -212,7 +210,6 @@ pub fn apply_client_message(
                     session.strokes.clear();
                     session.active_ids.clear();
                     session.owners.clear();
-                    session.dirty = true;
 
                     if let Some(history) = session.histories.get_mut(&sender) {
                         history.undo.push(Action::Clear { strokes });
@@ -275,7 +272,6 @@ pub fn apply_client_message(
                     history.undo.push(Action::EraseStroke(stroke));
                     history.redo.clear();
                 }
-                session.dirty = true;
 
                 Some((vec![ServerMessage::StrokeRemove { id }], true))
             } else {
@@ -371,7 +367,6 @@ pub fn apply_client_message(
             session.active_ids.clear();
             session.owners.clear();
             session.transform_sessions.clear();
-            session.dirty = true;
 
             for history in session.histories.values_mut() {
                 history.undo.clear();
@@ -494,7 +489,6 @@ fn remove_stroke(session: &mut Session, id: &str) -> bool {
     if removed {
         session.active_ids.remove(id);
         session.owners.remove(id);
-        session.dirty = true;
     }
     removed
 }
@@ -513,14 +507,12 @@ fn add_stroke(session: &mut Session, stroke: Stroke, owner: Option<Uuid>) {
     if let Some(owner) = owner {
         session.owners.insert(stroke.id.clone(), owner);
     }
-    session.dirty = true;
 }
 
 fn replace_stroke(session: &mut Session, stroke: Stroke) -> Option<Stroke> {
     if let Some(index) = session.strokes.iter().position(|s| s.id == stroke.id) {
         let before = session.strokes[index].clone();
         session.strokes[index] = stroke;
-        session.dirty = true;
 
         Some(before)
     } else {
@@ -537,7 +529,6 @@ fn remove_stroke_full(session: &mut Session, id: &str) -> Option<Stroke> {
     if removed.is_some() {
         session.active_ids.remove(id);
         session.owners.remove(id);
-        session.dirty = true;
     }
     removed
 }
