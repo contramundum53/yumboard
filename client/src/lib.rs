@@ -788,12 +788,12 @@ pub fn run() -> Result<(), JsValue> {
                         let dx1 = (world_point.x - anchor.x) as f64;
                         let dy1 = (world_point.y - anchor.y) as f64;
                         let mut sx = if dx0.abs() > f64::EPSILON {
-                            (dx1 / dx0).abs()
+                            dx1 / dx0
                         } else {
                             1.0
                         };
                         let mut sy = if dy0.abs() > f64::EPSILON {
-                            (dy1 / dy0).abs()
+                            dy1 / dy0
                         } else {
                             1.0
                         };
@@ -802,8 +802,8 @@ pub fn run() -> Result<(), JsValue> {
                             ScaleAxis::X => sy = 1.0,
                             ScaleAxis::Y => sx = 1.0,
                         }
-                        sx = sx.max(0.05);
-                        sy = sy.max(0.05);
+                        sx = clamp_scale(sx, 0.05);
+                        sy = clamp_scale(sy, 0.05);
                         let updated = apply_scale_xy(
                             &state.transform_snapshot,
                             anchor,
@@ -1601,6 +1601,18 @@ fn apply_scale_xy(strokes: &[Stroke], center: Point, sx: f64, sy: f64) -> Vec<St
                 .collect(),
         })
         .collect()
+}
+
+fn clamp_scale(value: f64, min_abs: f64) -> f64 {
+    if value.abs() < min_abs {
+        if value.is_sign_negative() {
+            -min_abs
+        } else {
+            min_abs
+        }
+    } else {
+        value
+    }
 }
 
 fn apply_rotation(strokes: &[Stroke], center: Point, angle: f64) -> Vec<Stroke> {
