@@ -155,6 +155,7 @@ pub fn erase_hits_at_point(state: &mut State, point: Point) -> Vec<String> {
             px,
             py,
             scale,
+            state.zoom,
             state.board_offset_x,
             state.board_offset_y,
             state.pan_x,

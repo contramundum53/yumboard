@@ -312,6 +312,7 @@ pub fn stroke_hit(
     px: f64,
     py: f64,
     scale: f64,
+    zoom: f64,
     offset_x: f64,
     offset_y: f64,
     pan_x: f64,
@@ -320,7 +321,7 @@ pub fn stroke_hit(
     if stroke.points.is_empty() {
         return false;
     }
-    let threshold = (stroke.size as f64 / 2.0).max(6.0);
+    let threshold = (stroke.size as f64 * zoom / 2.0).max(6.0);
     if stroke.points.len() == 1 {
         let point = stroke.points[0];
         let dx = point.x as f64 * scale + offset_x + pan_x - px;

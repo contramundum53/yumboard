@@ -18,11 +18,12 @@ pub fn draw_dot(
     size: f32,
 ) {
     let scale = board_scale * zoom;
+    let weight = size as f64 * zoom;
     let x = point.x as f64 * scale + board_offset_x + pan_x;
     let y = point.y as f64 * scale + board_offset_y + pan_y;
     ctx.set_fill_style_str(color);
     ctx.begin_path();
-    let _ = ctx.arc(x, y, size as f64 / 2.0, 0.0, std::f64::consts::PI * 2.0);
+    let _ = ctx.arc(x, y, weight / 2.0, 0.0, std::f64::consts::PI * 2.0);
     ctx.fill();
 }
 
@@ -40,13 +41,14 @@ pub fn draw_segment(
     size: f32,
 ) {
     let scale = board_scale * zoom;
+    let weight = size as f64 * zoom;
     let from_x = from.x as f64 * scale + board_offset_x + pan_x;
     let from_y = from.y as f64 * scale + board_offset_y + pan_y;
     let to_x = to.x as f64 * scale + board_offset_x + pan_x;
     let to_y = to.y as f64 * scale + board_offset_y + pan_y;
 
     ctx.set_stroke_style_str(color);
-    ctx.set_line_width(size as f64);
+    ctx.set_line_width(weight);
     ctx.begin_path();
     ctx.move_to(from_x, from_y);
     ctx.line_to(to_x, to_y);
