@@ -65,6 +65,7 @@ pub fn run() -> Result<(), JsValue> {
     let size_input: HtmlInputElement = get_element(&document, "size")?;
     let size_value: HtmlSpanElement = get_element(&document, "sizeValue")?;
     let clear_button: HtmlButtonElement = get_element(&document, "clear")?;
+    let pen_button: HtmlButtonElement = get_element(&document, "pen")?;
     let eraser_button: HtmlButtonElement = get_element(&document, "eraser")?;
     let pan_button: HtmlButtonElement = get_element(&document, "pan")?;
     let status_el = document
@@ -101,6 +102,7 @@ pub fn run() -> Result<(), JsValue> {
 
     update_size_label(&size_input, &size_value);
     set_status(&status_el, &status_text, "connecting", "Connecting...");
+    set_tool_button(&pen_button, true);
     set_tool_button(&eraser_button, false);
     set_tool_button(&pan_button, false);
     set_canvas_mode(&canvas, Tool::Draw, false);
@@ -241,15 +243,10 @@ pub fn run() -> Result<(), JsValue> {
         let tool_state = state.clone();
         let eraser_button_cb = eraser_button.clone();
         let pan_button_cb = pan_button.clone();
+        let pen_button_cb = pen_button.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = tool_state.borrow_mut();
-            state.tool = if state.tool == Tool::Draw {
-                Tool::Erase
-            } else if state.tool == Tool::Erase {
-                Tool::Draw
-            } else {
-                Tool::Erase
-            };
+            state.tool = Tool::Erase;
             state.drawing = false;
             state.current_id = None;
             state.erasing = false;
@@ -257,6 +254,7 @@ pub fn run() -> Result<(), JsValue> {
             state.erase_hits.clear();
             set_tool_button(&pan_button_cb, state.tool == Tool::Pan);
             set_tool_button(&eraser_button_cb, state.tool == Tool::Erase);
+            set_tool_button(&pen_button_cb, state.tool == Tool::Draw);
             set_canvas_mode(&state.canvas, state.tool, false);
         });
         eraser_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
@@ -267,6 +265,29 @@ pub fn run() -> Result<(), JsValue> {
         let tool_state = state.clone();
         let eraser_button_cb = eraser_button.clone();
         let pan_button_cb = pan_button.clone();
+        let pen_button_cb = pen_button.clone();
+        let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
+            let mut state = tool_state.borrow_mut();
+            state.tool = Tool::Draw;
+            state.drawing = false;
+            state.current_id = None;
+            state.erasing = false;
+            state.panning = false;
+            state.erase_hits.clear();
+            set_tool_button(&eraser_button_cb, state.tool == Tool::Erase);
+            set_tool_button(&pan_button_cb, state.tool == Tool::Pan);
+            set_tool_button(&pen_button_cb, state.tool == Tool::Draw);
+            set_canvas_mode(&state.canvas, state.tool, false);
+        });
+        pen_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
+        onclick.forget();
+    }
+
+    {
+        let tool_state = state.clone();
+        let eraser_button_cb = eraser_button.clone();
+        let pan_button_cb = pan_button.clone();
+        let pen_button_cb = pen_button.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = tool_state.borrow_mut();
             state.tool = if state.tool == Tool::Pan {
@@ -281,6 +302,7 @@ pub fn run() -> Result<(), JsValue> {
             state.erase_hits.clear();
             set_tool_button(&eraser_button_cb, state.tool == Tool::Erase);
             set_tool_button(&pan_button_cb, state.tool == Tool::Pan);
+            set_tool_button(&pen_button_cb, state.tool == Tool::Draw);
             set_canvas_mode(&state.canvas, state.tool, false);
         });
         pan_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
