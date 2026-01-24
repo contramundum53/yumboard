@@ -53,12 +53,18 @@ async fn main() {
                     .collect::<Vec<_>>()
             };
             for (session_id, session) in sessions {
-                if !session.is_dirty() {
-                    continue;
+                let maybe_strokes = {
+                    let mut session = session.write().await;
+                    if !session.dirty {
+                        None
+                    } else {
+                        session.dirty = false;
+                        Some(session.strokes.clone())
+                    }
+                };
+                if let Some(strokes) = maybe_strokes {
+                    save_session(&backup_state.session_dir, &session_id, &strokes).await;
                 }
-                let strokes = session.strokes.read().await.clone();
-                save_session(&backup_state.session_dir, &session_id, &strokes).await;
-                session.clear_dirty();
             }
         }
     });

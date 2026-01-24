@@ -15,12 +15,12 @@ pub fn normalize_session_id(value: &str) -> Option<String> {
     Some(parsed.to_string())
 }
 
-pub async fn get_or_create_session(state: &AppState, session_id: &str) -> Arc<Session> {
+pub async fn get_or_create_session(state: &AppState, session_id: &str) -> Arc<tokio::sync::RwLock<Session>> {
     if let Some(session) = state.sessions.read().await.get(session_id).cloned() {
         return session;
     }
     let strokes = load_session(&state.session_dir, session_id).await.unwrap_or_default();
-    let session = Arc::new(Session::new(strokes));
+    let session = Arc::new(tokio::sync::RwLock::new(Session::new(strokes)));
     let mut sessions = state.sessions.write().await;
     let entry = sessions
         .entry(session_id.to_string())

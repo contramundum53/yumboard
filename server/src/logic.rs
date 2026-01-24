@@ -1,12 +1,14 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use pfboard_shared::{ClientMessage, Point, ServerMessage, Stroke};
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::state::{Action, Session, TransformSession, MAX_POINTS_PER_STROKE, MAX_STROKES};
 
 pub async fn apply_client_message(
-    session: &Session,
+    session: &Arc<RwLock<Session>>,
     sender: Uuid,
     message: ClientMessage,
 ) -> Option<(Vec<ServerMessage>, bool)> {
@@ -30,29 +32,19 @@ pub async fn apply_client_message(
                 points: vec![point],
             };
 
-            let removed = {
-                let mut strokes = session.strokes.write().await;
-                strokes.push(stroke);
-                let overflow = strokes.len().saturating_sub(MAX_STROKES);
-                if overflow > 0 {
-                    strokes.drain(0..overflow).collect::<Vec<_>>()
-                } else {
-                    Vec::new()
-                }
-            };
-
-            if !removed.is_empty() {
-                let mut active = session.active_ids.write().await;
-                let mut owners = session.owners.write().await;
+            let mut session = session.write().await;
+            session.strokes.push(stroke);
+            let overflow = session.strokes.len().saturating_sub(MAX_STROKES);
+            if overflow > 0 {
+                let removed = session.strokes.drain(0..overflow).collect::<Vec<_>>();
                 for stroke in removed {
-                    active.remove(&stroke.id);
-                    owners.remove(&stroke.id);
+                    session.active_ids.remove(&stroke.id);
+                    session.owners.remove(&stroke.id);
                 }
             }
-
-            session.active_ids.write().await.insert(id.clone());
-            session.owners.write().await.insert(id.clone(), sender);
-            session.mark_dirty();
+            session.active_ids.insert(id.clone());
+            session.owners.insert(id.clone(), sender);
+            session.dirty = true;
 
             Some((
                 vec![ServerMessage::StrokeStart {
@@ -69,42 +61,34 @@ pub async fn apply_client_message(
                 return None;
             }
             let point = normalize_point(point)?;
-            if !session.active_ids.read().await.contains(&id) {
+            let mut session = session.write().await;
+            if !session.active_ids.contains(&id) {
                 return None;
             }
-
-            let mut appended = false;
-            {
-                let mut strokes = session.strokes.write().await;
-                if let Some(stroke) = strokes.iter_mut().find(|stroke| stroke.id == id) {
-                    if stroke.points.len() < MAX_POINTS_PER_STROKE {
-                        stroke.points.push(point);
-                        appended = true;
-                    }
+            if let Some(stroke) = session.strokes.iter_mut().find(|stroke| stroke.id == id) {
+                if stroke.points.len() < MAX_POINTS_PER_STROKE {
+                    stroke.points.push(point);
+                    session.dirty = true;
+                    return Some((vec![ServerMessage::StrokeMove { id, point }], false));
                 }
             }
-
-            if appended {
-                session.mark_dirty();
-                Some((vec![ServerMessage::StrokeMove { id, point }], false))
-            } else {
-                None
-            }
+            None
         }
         ClientMessage::StrokeEnd { id } => {
             if id.is_empty() || id.len() > 64 {
                 return None;
             }
-            session.active_ids.write().await.remove(&id);
-            if let Some(owner) = session.owners.read().await.get(&id) {
+            let mut session = session.write().await;
+            session.active_ids.remove(&id);
+            if let Some(owner) = session.owners.get(&id) {
                 if *owner == sender {
-                    let stroke = {
-                        let strokes = session.strokes.read().await;
-                        strokes.iter().find(|stroke| stroke.id == id).cloned()
-                    };
+                    let stroke = session
+                        .strokes
+                        .iter()
+                        .find(|stroke| stroke.id == id)
+                        .cloned();
                     if let Some(stroke) = stroke {
-                        let mut histories = session.histories.write().await;
-                        if let Some(history) = histories.get_mut(&sender) {
+                        if let Some(history) = session.histories.get_mut(&sender) {
                             history.undo.push(Action::AddStroke(stroke));
                             history.redo.clear();
                         }
@@ -114,30 +98,30 @@ pub async fn apply_client_message(
             Some((vec![ServerMessage::StrokeEnd { id }], false))
         }
         ClientMessage::Clear => {
-            let cleared = session.strokes.write().await.drain(..).collect::<Vec<_>>();
-            session.active_ids.write().await.clear();
-            session.owners.write().await.clear();
-            session.transform_sessions.write().await.clear();
-            session.mark_dirty();
-            let mut histories = session.histories.write().await;
-            if let Some(history) = histories.get_mut(&sender) {
+            let mut session = session.write().await;
+            let cleared = session.strokes.drain(..).collect::<Vec<_>>();
+            session.active_ids.clear();
+            session.owners.clear();
+            session.transform_sessions.clear();
+            session.dirty = true;
+            if let Some(history) = session.histories.get_mut(&sender) {
                 history.undo.push(Action::Clear { strokes: cleared });
                 history.redo.clear();
             }
             Some((vec![ServerMessage::Clear], false))
         }
         ClientMessage::Undo => {
-            let action = {
-                let mut histories = session.histories.write().await;
-                histories.get_mut(&sender).and_then(|history| history.undo.pop())
-            }?;
+            let mut session = session.write().await;
+            let action = session
+                .histories
+                .get_mut(&sender)
+                .and_then(|history| history.undo.pop())?;
 
             match action {
                 Action::AddStroke(stroke) => {
                     let stroke_id = stroke.id.clone();
-                    if remove_stroke(session, &stroke_id).await {
-                        let mut histories = session.histories.write().await;
-                        if let Some(history) = histories.get_mut(&sender) {
+                    if remove_stroke(&mut session, &stroke_id) {
+                        if let Some(history) = session.histories.get_mut(&sender) {
                             history.redo.push(Action::AddStroke(stroke));
                         }
                         Some((vec![ServerMessage::StrokeRemove { id: stroke_id }], true))
@@ -146,19 +130,17 @@ pub async fn apply_client_message(
                     }
                 }
                 Action::EraseStroke(stroke) => {
-                    add_stroke(session, stroke.clone(), Some(sender)).await;
-                    let mut histories = session.histories.write().await;
-                    if let Some(history) = histories.get_mut(&sender) {
+                    add_stroke(&mut session, stroke.clone(), Some(sender));
+                    if let Some(history) = session.histories.get_mut(&sender) {
                         history.redo.push(Action::EraseStroke(stroke.clone()));
                     }
                     Some((vec![ServerMessage::StrokeRestore { stroke }], true))
                 }
                 Action::Clear { strokes } => {
                     for stroke in &strokes {
-                        add_stroke(session, stroke.clone(), None).await;
+                        add_stroke(&mut session, stroke.clone(), None);
                     }
-                    let mut histories = session.histories.write().await;
-                    if let Some(history) = histories.get_mut(&sender) {
+                    if let Some(history) = session.histories.get_mut(&sender) {
                         history.redo.push(Action::Clear {
                             strokes: strokes.clone(),
                         });
@@ -170,14 +152,12 @@ pub async fn apply_client_message(
                     Some((messages, true))
                 }
                 Action::ReplaceStroke { before, after } => {
-                    let replaced = replace_stroke(session, before.clone()).await;
+                    let replaced = replace_stroke(&mut session, before.clone());
                     if replaced.is_some() {
-                        let mut histories = session.histories.write().await;
-                        if let Some(history) = histories.get_mut(&sender) {
-                            history.redo.push(Action::ReplaceStroke {
-                                before: before.clone(),
-                                after,
-                            });
+                        if let Some(history) = session.histories.get_mut(&sender) {
+                            history
+                                .redo
+                                .push(Action::ReplaceStroke { before: before.clone(), after });
                         }
                         Some((vec![ServerMessage::StrokeReplace { stroke: before }], true))
                     } else {
@@ -187,19 +167,15 @@ pub async fn apply_client_message(
                 Action::Transform { before, after } => {
                     let mut replaced = Vec::new();
                     for stroke in &before {
-                        if replace_stroke(session, stroke.clone()).await.is_some() {
+                        if replace_stroke(&mut session, stroke.clone()).is_some() {
                             replaced.push(stroke.clone());
                         }
                     }
                     if replaced.is_empty() {
                         return None;
                     }
-                    let mut histories = session.histories.write().await;
-                    if let Some(history) = histories.get_mut(&sender) {
-                        history.redo.push(Action::Transform {
-                            before: before.clone(),
-                            after,
-                        });
+                    if let Some(history) = session.histories.get_mut(&sender) {
+                        history.redo.push(Action::Transform { before, after });
                     }
                     let messages = replaced
                         .into_iter()
@@ -210,25 +186,24 @@ pub async fn apply_client_message(
             }
         }
         ClientMessage::Redo => {
-            let action = {
-                let mut histories = session.histories.write().await;
-                histories.get_mut(&sender).and_then(|history| history.redo.pop())
-            }?;
+            let mut session = session.write().await;
+            let action = session
+                .histories
+                .get_mut(&sender)
+                .and_then(|history| history.redo.pop())?;
 
             match action {
                 Action::AddStroke(stroke) => {
-                    add_stroke(session, stroke.clone(), Some(sender)).await;
-                    let mut histories = session.histories.write().await;
-                    if let Some(history) = histories.get_mut(&sender) {
+                    add_stroke(&mut session, stroke.clone(), Some(sender));
+                    if let Some(history) = session.histories.get_mut(&sender) {
                         history.undo.push(Action::AddStroke(stroke.clone()));
                     }
                     Some((vec![ServerMessage::StrokeRestore { stroke }], true))
                 }
                 Action::EraseStroke(stroke) => {
                     let stroke_id = stroke.id.clone();
-                    if remove_stroke(session, &stroke_id).await {
-                        let mut histories = session.histories.write().await;
-                        if let Some(history) = histories.get_mut(&sender) {
+                    if remove_stroke(&mut session, &stroke_id) {
+                        if let Some(history) = session.histories.get_mut(&sender) {
                             history.undo.push(Action::EraseStroke(stroke));
                         }
                         Some((vec![ServerMessage::StrokeRemove { id: stroke_id }], true))
@@ -237,21 +212,19 @@ pub async fn apply_client_message(
                     }
                 }
                 Action::Clear { strokes } => {
-                    session.strokes.write().await.clear();
-                    session.active_ids.write().await.clear();
-                    session.owners.write().await.clear();
-                    session.mark_dirty();
-                    let mut histories = session.histories.write().await;
-                    if let Some(history) = histories.get_mut(&sender) {
+                    session.strokes.clear();
+                    session.active_ids.clear();
+                    session.owners.clear();
+                    session.dirty = true;
+                    if let Some(history) = session.histories.get_mut(&sender) {
                         history.undo.push(Action::Clear { strokes });
                     }
                     Some((vec![ServerMessage::Clear], true))
                 }
                 Action::ReplaceStroke { before, after } => {
-                    let replaced = replace_stroke(session, after.clone()).await;
+                    let replaced = replace_stroke(&mut session, after.clone());
                     if replaced.is_some() {
-                        let mut histories = session.histories.write().await;
-                        if let Some(history) = histories.get_mut(&sender) {
+                        if let Some(history) = session.histories.get_mut(&sender) {
                             history.undo.push(Action::ReplaceStroke {
                                 before,
                                 after: after.clone(),
@@ -265,15 +238,14 @@ pub async fn apply_client_message(
                 Action::Transform { before, after } => {
                     let mut replaced = Vec::new();
                     for stroke in &after {
-                        if replace_stroke(session, stroke.clone()).await.is_some() {
+                        if replace_stroke(&mut session, stroke.clone()).is_some() {
                             replaced.push(stroke.clone());
                         }
                     }
                     if replaced.is_empty() {
                         return None;
                     }
-                    let mut histories = session.histories.write().await;
-                    if let Some(history) = histories.get_mut(&sender) {
+                    if let Some(history) = session.histories.get_mut(&sender) {
                         history.undo.push(Action::Transform {
                             before,
                             after: after.clone(),
@@ -292,24 +264,21 @@ pub async fn apply_client_message(
                 return None;
             }
 
-            let removed = {
-                let mut strokes = session.strokes.write().await;
-                if let Some(index) = strokes.iter().position(|s| s.id == id) {
-                    Some(strokes.remove(index))
-                } else {
-                    None
-                }
+            let mut session = session.write().await;
+            let removed = if let Some(index) = session.strokes.iter().position(|s| s.id == id) {
+                Some(session.strokes.remove(index))
+            } else {
+                None
             };
 
             if let Some(stroke) = removed {
-                session.active_ids.write().await.remove(&id);
-                session.owners.write().await.remove(&id);
-                let mut histories = session.histories.write().await;
-                if let Some(history) = histories.get_mut(&sender) {
+                session.active_ids.remove(&id);
+                session.owners.remove(&id);
+                if let Some(history) = session.histories.get_mut(&sender) {
                     history.undo.push(Action::EraseStroke(stroke));
                     history.redo.clear();
                 }
-                session.mark_dirty();
+                session.dirty = true;
                 Some((vec![ServerMessage::StrokeRemove { id }], true))
             } else {
                 None
@@ -317,15 +286,11 @@ pub async fn apply_client_message(
         }
         ClientMessage::StrokeReplace { stroke } => {
             let stroke = sanitize_stroke(stroke)?;
-            let before = replace_stroke(session, stroke.clone()).await?;
-            let in_transform = session
-                .transform_sessions
-                .read()
-                .await
-                .contains_key(&sender);
+            let mut session = session.write().await;
+            let before = replace_stroke(&mut session, stroke.clone())?;
+            let in_transform = session.transform_sessions.contains_key(&sender);
             if !in_transform {
-                let mut histories = session.histories.write().await;
-                if let Some(history) = histories.get_mut(&sender) {
+                if let Some(history) = session.histories.get_mut(&sender) {
                     history
                         .undo
                         .push(Action::ReplaceStroke { before, after: stroke.clone() });
@@ -339,41 +304,34 @@ pub async fn apply_client_message(
             if ids.is_empty() {
                 return None;
             }
-            let before = {
-                let strokes = session.strokes.read().await;
-                strokes
-                    .iter()
-                    .filter(|stroke| ids.iter().any(|id| id == &stroke.id))
-                    .cloned()
-                    .collect::<Vec<_>>()
-            };
-            session.transform_sessions.write().await.insert(
-                sender,
-                TransformSession {
-                    ids,
-                    before,
-                },
-            );
+            let mut session = session.write().await;
+            let before = session
+                .strokes
+                .iter()
+                .filter(|stroke| ids.iter().any(|id| id == &stroke.id))
+                .cloned()
+                .collect::<Vec<_>>();
+            session
+                .transform_sessions
+                .insert(sender, TransformSession { ids, before });
             None
         }
         ClientMessage::TransformEnd { ids: _ } => {
-            let session_info = session.transform_sessions.write().await.remove(&sender);
+            let mut session = session.write().await;
+            let session_info = session.transform_sessions.remove(&sender);
             let Some(session_info) = session_info else {
                 return None;
             };
-            let after = {
-                let strokes = session.strokes.read().await;
-                strokes
-                    .iter()
-                    .filter(|stroke| session_info.ids.iter().any(|id| id == &stroke.id))
-                    .cloned()
-                    .collect::<Vec<_>>()
-            };
+            let after = session
+                .strokes
+                .iter()
+                .filter(|stroke| session_info.ids.iter().any(|id| id == &stroke.id))
+                .cloned()
+                .collect::<Vec<_>>();
             if session_info.before.is_empty() || after.is_empty() {
                 return None;
             }
-            let mut histories = session.histories.write().await;
-            if let Some(history) = histories.get_mut(&sender) {
+            if let Some(history) = session.histories.get_mut(&sender) {
                 history.undo.push(Action::Transform {
                     before: session_info.before,
                     after,
@@ -386,12 +344,13 @@ pub async fn apply_client_message(
             if ids.is_empty() {
                 return None;
             }
+            let mut session = session.write().await;
             let mut removed = Vec::new();
             for id in ids {
                 if id.is_empty() || id.len() > 64 {
                     continue;
                 }
-                let stroke = remove_stroke_full(session, &id).await;
+                let stroke = remove_stroke_full(&mut session, &id);
                 if let Some(stroke) = stroke {
                     removed.push(stroke);
                 }
@@ -399,8 +358,7 @@ pub async fn apply_client_message(
             if removed.is_empty() {
                 return None;
             }
-            let mut histories = session.histories.write().await;
-            if let Some(history) = histories.get_mut(&sender) {
+            if let Some(history) = session.histories.get_mut(&sender) {
                 for stroke in &removed {
                     history.undo.push(Action::EraseStroke(stroke.clone()));
                 }
@@ -414,16 +372,13 @@ pub async fn apply_client_message(
         }
         ClientMessage::Load { strokes } => {
             let strokes = sanitize_strokes(strokes);
-            {
-                let mut stored = session.strokes.write().await;
-                *stored = strokes.clone();
-            }
-            session.active_ids.write().await.clear();
-            session.owners.write().await.clear();
-            session.transform_sessions.write().await.clear();
-            session.mark_dirty();
-            let mut histories = session.histories.write().await;
-            for history in histories.values_mut() {
+            let mut session = session.write().await;
+            session.strokes = strokes.clone();
+            session.active_ids.clear();
+            session.owners.clear();
+            session.transform_sessions.clear();
+            session.dirty = true;
+            for history in session.histories.values_mut() {
                 history.undo.clear();
                 history.redo.clear();
             }
@@ -432,11 +387,11 @@ pub async fn apply_client_message(
     }
 }
 
-pub async fn broadcast_except(session: &Session, sender: Uuid, message: ServerMessage) {
+pub async fn broadcast_except(session: &Arc<RwLock<Session>>, sender: Uuid, message: ServerMessage) {
     let mut stale = Vec::new();
     {
-        let peers = session.peers.read().await;
-        for (id, tx) in peers.iter() {
+        let session = session.read().await;
+        for (id, tx) in session.peers.iter() {
             if *id == sender {
                 continue;
             }
@@ -447,18 +402,18 @@ pub async fn broadcast_except(session: &Session, sender: Uuid, message: ServerMe
     }
 
     if !stale.is_empty() {
-        let mut peers = session.peers.write().await;
+        let mut session = session.write().await;
         for id in stale {
-            peers.remove(&id);
+            session.peers.remove(&id);
         }
     }
 }
 
-pub async fn broadcast_all(session: &Session, message: ServerMessage) {
+pub async fn broadcast_all(session: &Arc<RwLock<Session>>, message: ServerMessage) {
     let mut stale = Vec::new();
     {
-        let peers = session.peers.read().await;
-        for (id, tx) in peers.iter() {
+        let session = session.read().await;
+        for (id, tx) in session.peers.iter() {
             if tx.send(message.clone()).is_err() {
                 stale.push(*id);
             }
@@ -466,9 +421,9 @@ pub async fn broadcast_all(session: &Session, message: ServerMessage) {
     }
 
     if !stale.is_empty() {
-        let mut peers = session.peers.write().await;
+        let mut session = session.write().await;
         for id in stale {
-            peers.remove(&id);
+            session.peers.remove(&id);
         }
     }
 }
@@ -530,76 +485,59 @@ fn sanitize_ids(ids: Vec<String>) -> Vec<String> {
     result
 }
 
-async fn remove_stroke(session: &Session, id: &str) -> bool {
-    let removed = {
-        let mut strokes = session.strokes.write().await;
-        if let Some(index) = strokes.iter().position(|s| s.id == id) {
-            strokes.remove(index);
-            true
-        } else {
-            false
-        }
+fn remove_stroke(session: &mut Session, id: &str) -> bool {
+    let removed = if let Some(index) = session.strokes.iter().position(|s| s.id == id) {
+        session.strokes.remove(index);
+        true
+    } else {
+        false
     };
     if removed {
-        session.active_ids.write().await.remove(id);
-        session.owners.write().await.remove(id);
-        session.mark_dirty();
+        session.active_ids.remove(id);
+        session.owners.remove(id);
+        session.dirty = true;
     }
     removed
 }
 
-async fn add_stroke(session: &Session, stroke: Stroke, owner: Option<Uuid>) {
-    let removed = {
-        let mut strokes = session.strokes.write().await;
-        strokes.push(stroke.clone());
-        let overflow = strokes.len().saturating_sub(MAX_STROKES);
-        if overflow > 0 {
-            strokes.drain(0..overflow).collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        }
-    };
-
-    if !removed.is_empty() {
-        let mut active = session.active_ids.write().await;
-        let mut owners = session.owners.write().await;
+fn add_stroke(session: &mut Session, stroke: Stroke, owner: Option<Uuid>) {
+    session.strokes.push(stroke.clone());
+    let overflow = session.strokes.len().saturating_sub(MAX_STROKES);
+    if overflow > 0 {
+        let removed = session.strokes.drain(0..overflow).collect::<Vec<_>>();
         for stroke in removed {
-            active.remove(&stroke.id);
-            owners.remove(&stroke.id);
+            session.active_ids.remove(&stroke.id);
+            session.owners.remove(&stroke.id);
         }
     }
 
     if let Some(owner) = owner {
-        session.owners.write().await.insert(stroke.id.clone(), owner);
+        session.owners.insert(stroke.id.clone(), owner);
     }
-    session.mark_dirty();
+    session.dirty = true;
 }
 
-async fn replace_stroke(session: &Session, stroke: Stroke) -> Option<Stroke> {
-    let mut strokes = session.strokes.write().await;
-    if let Some(index) = strokes.iter().position(|s| s.id == stroke.id) {
-        let before = strokes[index].clone();
-        strokes[index] = stroke;
-        session.mark_dirty();
+fn replace_stroke(session: &mut Session, stroke: Stroke) -> Option<Stroke> {
+    if let Some(index) = session.strokes.iter().position(|s| s.id == stroke.id) {
+        let before = session.strokes[index].clone();
+        session.strokes[index] = stroke;
+        session.dirty = true;
         Some(before)
     } else {
         None
     }
 }
 
-async fn remove_stroke_full(session: &Session, id: &str) -> Option<Stroke> {
-    let removed = {
-        let mut strokes = session.strokes.write().await;
-        if let Some(index) = strokes.iter().position(|s| s.id == id) {
-            Some(strokes.remove(index))
-        } else {
-            None
-        }
+fn remove_stroke_full(session: &mut Session, id: &str) -> Option<Stroke> {
+    let removed = if let Some(index) = session.strokes.iter().position(|s| s.id == id) {
+        Some(session.strokes.remove(index))
+    } else {
+        None
     };
     if removed.is_some() {
-        session.active_ids.write().await.remove(id);
-        session.owners.write().await.remove(id);
-        session.mark_dirty();
+        session.active_ids.remove(id);
+        session.owners.remove(id);
+        session.dirty = true;
     }
     removed
 }

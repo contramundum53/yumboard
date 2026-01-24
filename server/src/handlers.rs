@@ -53,14 +53,15 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: String) {
     let connection_id = Uuid::new_v4();
 
     let session = get_or_create_session(&state, &session_id).await;
-    session.peers.write().await.insert(connection_id, tx);
-    session
-        .histories
-        .write()
-        .await
-        .insert(connection_id, crate::state::ClientHistory::default());
+    {
+        let mut session = session.write().await;
+        session.peers.insert(connection_id, tx);
+        session
+            .histories
+            .insert(connection_id, crate::state::ClientHistory::default());
+    }
 
-    let strokes_snapshot = session.strokes.read().await.clone();
+    let strokes_snapshot = session.read().await.strokes.clone();
     if let Ok(sync_payload) = serde_json::to_string(&ServerMessage::Sync {
         strokes: strokes_snapshot,
     }) {
@@ -100,21 +101,30 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: String) {
         }
     }
 
-    session.peers.write().await.remove(&connection_id);
-    session.histories.write().await.remove(&connection_id);
-    session
-        .transform_sessions
-        .write()
-        .await
-        .remove(&connection_id);
+    {
+        let mut session = session.write().await;
+        session.peers.remove(&connection_id);
+        session.histories.remove(&connection_id);
+        session.transform_sessions.remove(&connection_id);
+    }
     send_task.abort();
 
-    if session.peers.read().await.is_empty() {
-        if session.is_dirty() {
-            let strokes = session.strokes.read().await.clone();
-            save_session(&state.session_dir, &session_id, &strokes).await;
-            session.clear_dirty();
+    let mut should_remove = false;
+    let mut maybe_strokes = None;
+    {
+        let mut session_guard = session.write().await;
+        if session_guard.peers.is_empty() {
+            should_remove = true;
+            if session_guard.dirty {
+                session_guard.dirty = false;
+                maybe_strokes = Some(session_guard.strokes.clone());
+            }
         }
+    }
+    if let Some(strokes) = maybe_strokes {
+        save_session(&state.session_dir, &session_id, &strokes).await;
+    }
+    if should_remove {
         let mut sessions = state.sessions.write().await;
         if let Some(current) = sessions.get(&session_id) {
             if Arc::ptr_eq(current, &session) {

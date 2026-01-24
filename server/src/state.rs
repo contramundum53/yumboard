@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use pfboard_shared::Stroke;
@@ -12,18 +11,18 @@ pub const MAX_POINTS_PER_STROKE: usize = 5000;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub sessions: Arc<RwLock<HashMap<String, Arc<Session>>>>,
+    pub sessions: Arc<RwLock<HashMap<String, Arc<RwLock<Session>>>>>,
     pub session_dir: PathBuf,
 }
 
 pub struct Session {
-    pub strokes: Arc<RwLock<Vec<Stroke>>>,
-    pub active_ids: Arc<RwLock<HashSet<String>>>,
-    pub owners: Arc<RwLock<HashMap<String, Uuid>>>,
-    pub histories: Arc<RwLock<HashMap<Uuid, ClientHistory>>>,
-    pub peers: Arc<RwLock<HashMap<Uuid, mpsc::UnboundedSender<pfboard_shared::ServerMessage>>>>,
-    pub transform_sessions: Arc<RwLock<HashMap<Uuid, TransformSession>>>,
-    pub dirty: AtomicBool,
+    pub strokes: Vec<Stroke>,
+    pub active_ids: HashSet<String>,
+    pub owners: HashMap<String, Uuid>,
+    pub histories: HashMap<Uuid, ClientHistory>,
+    pub peers: HashMap<Uuid, mpsc::UnboundedSender<pfboard_shared::ServerMessage>>,
+    pub transform_sessions: HashMap<Uuid, TransformSession>,
+    pub dirty: bool,
 }
 
 #[derive(Default)]
@@ -48,25 +47,13 @@ pub struct TransformSession {
 impl Session {
     pub fn new(strokes: Vec<Stroke>) -> Self {
         Self {
-            strokes: Arc::new(RwLock::new(strokes)),
-            active_ids: Arc::new(RwLock::new(HashSet::new())),
-            owners: Arc::new(RwLock::new(HashMap::new())),
-            histories: Arc::new(RwLock::new(HashMap::new())),
-            peers: Arc::new(RwLock::new(HashMap::new())),
-            transform_sessions: Arc::new(RwLock::new(HashMap::new())),
-            dirty: AtomicBool::new(false),
+            strokes,
+            active_ids: HashSet::new(),
+            owners: HashMap::new(),
+            histories: HashMap::new(),
+            peers: HashMap::new(),
+            transform_sessions: HashMap::new(),
+            dirty: false,
         }
-    }
-
-    pub fn mark_dirty(&self) {
-        self.dirty.store(true, Ordering::Relaxed);
-    }
-
-    pub fn clear_dirty(&self) {
-        self.dirty.store(false, Ordering::Relaxed);
-    }
-
-    pub fn is_dirty(&self) -> bool {
-        self.dirty.load(Ordering::Relaxed)
     }
 }
