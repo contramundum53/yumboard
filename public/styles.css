@@ -157,7 +157,7 @@ body {
 .range-control::before {
   content: "";
   position: absolute;
-  width: 34px;
+  width: 10px;
   height: 130px;
   left: 50%;
   top: 0;
