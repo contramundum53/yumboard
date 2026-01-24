@@ -99,6 +99,31 @@ body {
   cursor: pointer;
 }
 
+.palette-control {
+  gap: 8px;
+}
+
+.palette {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(35, 45, 65, 0.25);
+  background: #fff;
+  cursor: pointer;
+  box-shadow: 0 6px 14px rgba(18, 30, 52, 0.18);
+}
+
+.swatch.active {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 2px rgba(26, 31, 42, 0.2);
+}
+
 .range-control {
   grid-template-columns: 1fr;
   align-items: center;

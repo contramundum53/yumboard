@@ -62,6 +62,8 @@ struct Bounds {
     max_y: f64,
 }
 
+const PALETTE_LIMIT: usize = 8;
+
 struct State {
     canvas: HtmlCanvasElement,
     ctx: CanvasRenderingContext2d,
@@ -87,6 +89,7 @@ struct State {
     pan_y: f64,
     selected_ids: Vec<String>,
     lasso_points: Vec<Point>,
+    palette: Vec<String>,
     selection_mode: SelectionMode,
     transform_center: Point,
     transform_anchor: Point,
@@ -114,6 +117,7 @@ pub fn run() -> Result<(), JsValue> {
     ctx.set_line_join("round");
 
     let color_input: HtmlInputElement = get_element(&document, "color")?;
+    let palette_el: HtmlElement = get_element(&document, "palette")?;
     let size_input: HtmlInputElement = get_element(&document, "size")?;
     let size_value: HtmlSpanElement = get_element(&document, "sizeValue")?;
     let clear_button: HtmlButtonElement = get_element(&document, "clear")?;
@@ -157,6 +161,7 @@ pub fn run() -> Result<(), JsValue> {
         pan_y: 0.0,
         selected_ids: Vec::new(),
         lasso_points: Vec::new(),
+        palette: Vec::new(),
         selection_mode: SelectionMode::None,
         transform_center: Point { x: 0.0, y: 0.0 },
         transform_anchor: Point { x: 0.0, y: 0.0 },
@@ -173,6 +178,13 @@ pub fn run() -> Result<(), JsValue> {
     set_tool_button(&eraser_button, false);
     set_tool_button(&pan_button, false);
     set_canvas_mode(&canvas, Tool::Draw, false);
+    {
+        let mut state = state.borrow_mut();
+        if let Some(color) = normalize_palette_color(&color_input.value()) {
+            add_color_to_palette(&mut state.palette, &color);
+        }
+        render_palette(&document, &palette_el, &state.palette, &color_input.value());
+    }
 
     let ws_url = websocket_url(&window)?;
     let socket = Rc::new(WebSocket::new(&ws_url)?);
@@ -438,6 +450,42 @@ pub fn run() -> Result<(), JsValue> {
         });
         pan_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
+    }
+
+    {
+        let palette_state = state.clone();
+        let palette_el_cb = palette_el.clone();
+        let palette_el_listener = palette_el.clone();
+        let color_input = color_input.clone();
+        let document = document.clone();
+        let onclick = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
+            let color = match palette_color_from_event(&event) {
+                Some(color) => color,
+                None => return,
+            };
+            color_input.set_value(&color);
+            let mut state = palette_state.borrow_mut();
+            add_color_to_palette(&mut state.palette, &color);
+            render_palette(&document, &palette_el_cb, &state.palette, &color_input.value());
+        });
+        palette_el_listener.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
+        onclick.forget();
+    }
+
+    {
+        let palette_state = state.clone();
+        let palette_el_cb = palette_el.clone();
+        let color_input_cb = color_input.clone();
+        let color_input_listener = color_input.clone();
+        let document = document.clone();
+        let oninput = Closure::<dyn FnMut(Event)>::new(move |_| {
+            let color = color_input_cb.value();
+            let mut state = palette_state.borrow_mut();
+            add_color_to_palette(&mut state.palette, &color);
+            render_palette(&document, &palette_el_cb, &state.palette, &color_input_cb.value());
+        });
+        color_input_listener.add_event_listener_with_callback("input", oninput.as_ref().unchecked_ref())?;
+        oninput.forget();
     }
 
     {
@@ -1156,6 +1204,63 @@ fn set_canvas_mode(canvas: &HtmlCanvasElement, tool: Tool, dragging: bool) {
 fn set_status(status_el: &Element, status_text: &Element, state: &str, text: &str) {
     let _ = status_el.set_attribute("data-state", state);
     status_text.set_text_content(Some(text));
+}
+
+fn normalize_palette_color(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_lowercase())
+    }
+}
+
+fn add_color_to_palette(palette: &mut Vec<String>, color: &str) {
+    let Some(color) = normalize_palette_color(color) else {
+        return;
+    };
+    palette.retain(|item| item != &color);
+    palette.insert(0, color);
+    if palette.len() > PALETTE_LIMIT {
+        palette.truncate(PALETTE_LIMIT);
+    }
+}
+
+fn render_palette(document: &Document, palette_el: &HtmlElement, colors: &[String], current: &str) {
+    palette_el.set_inner_html("");
+    let current = normalize_palette_color(current);
+    for color in colors {
+        let Ok(element) = document.create_element("button") else {
+            continue;
+        };
+        let Ok(button) = element.dyn_into::<HtmlButtonElement>() else {
+            continue;
+        };
+        let _ = button.set_attribute("type", "button");
+        let _ = button.set_attribute("data-color", color);
+        let _ = button.set_attribute("aria-label", &format!("Use color {color}"));
+        let class_name = if current.as_deref() == Some(color.as_str()) {
+            "swatch active"
+        } else {
+            "swatch"
+        };
+        let _ = button.set_attribute("class", class_name);
+        let _ = button.style().set_property("background", color);
+        let _ = palette_el.append_child(&button);
+    }
+}
+
+fn palette_color_from_event(event: &Event) -> Option<String> {
+    let mut current = event
+        .target()
+        .and_then(|target| target.dyn_into::<Element>().ok());
+    while let Some(element) = current {
+        if let Some(color) = element.get_attribute("data-color") {
+            return normalize_palette_color(&color);
+        }
+        current = element.parent_element().map(|parent| parent.into());
+    }
+    None
 }
 
 fn resize_canvas(window: &Window, state: &mut State) {
