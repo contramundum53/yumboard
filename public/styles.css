@@ -228,6 +228,13 @@ body {
   border-color: transparent;
 }
 
+.tool-icon {
+  width: 22px;
+  height: 22px;
+  display: block;
+  pointer-events: none;
+}
+
 .clear {
   border: none;
   background: var(--accent);
