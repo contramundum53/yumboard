@@ -12,7 +12,7 @@ mod sessions;
 mod state;
 
 use crate::handlers::{root_handler, session_handler, ws_handler};
-use crate::sessions::save_session_backup;
+use crate::sessions::save_session;
 use crate::state::AppState;
 
 #[tokio::main]
@@ -54,7 +54,7 @@ async fn main() {
             };
             for (session_id, session) in sessions {
                 let strokes = session.strokes.read().await.clone();
-                save_session_backup(&backup_state.session_dir, &session_id, &strokes).await;
+                save_session(&backup_state.session_dir, &session_id, &strokes).await;
             }
         }
     });
