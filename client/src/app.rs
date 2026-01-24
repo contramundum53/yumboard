@@ -720,19 +720,33 @@ pub fn run() -> Result<(), JsValue> {
                 };
                 let hit = {
                     let state = down_state.borrow();
-                    selection_hit_test(&state, screen_x, screen_y)
+                    match &state.mode {
+                        Mode::Select(select) => {
+                            selection_hit_test(&state, select, screen_x, screen_y)
+                        }
+                        _ => None,
+                    }
                 };
                 let selection_ids = {
                     let state = down_state.borrow();
-                    state.selected_ids().to_vec()
+                    match &state.mode {
+                        Mode::Select(select) => select.selected_ids.clone(),
+                        _ => Vec::new(),
+                    }
                 };
                 let snapshot = {
                     let state = down_state.borrow();
-                    selected_strokes(&state)
+                    match &state.mode {
+                        Mode::Select(select) => selected_strokes(&state.strokes, select),
+                        _ => Vec::new(),
+                    }
                 };
                 let center = {
                     let state = down_state.borrow();
-                    selection_center(&state)
+                    match &state.mode {
+                        Mode::Select(select) => selection_center(&state.strokes, select),
+                        _ => None,
+                    }
                 };
                 let mut state = down_state.borrow_mut();
                 if !matches!(&state.mode, Mode::Select(_)) {
@@ -914,12 +928,19 @@ pub fn run() -> Result<(), JsValue> {
                     state.board_offset_y,
                 )
             };
+            let rect = move_canvas.get_bounding_client_rect();
+            let screen_x = event.client_x() as f64 - rect.left();
+            let screen_y = event.client_y() as f64 - rect.top();
+            let hit = {
+                let state = move_state.borrow();
+                match &state.mode {
+                    Mode::Select(select) => selection_hit_test(&state, select, screen_x, screen_y),
+                    _ => None,
+                }
+            };
             let mut state = move_state.borrow_mut();
             match &mut state.mode {
                 Mode::Select(select) => {
-                    let rect = move_canvas.get_bounding_client_rect();
-                    let screen_x = event.client_x() as f64 - rect.left();
-                    let screen_y = event.client_y() as f64 - rect.top();
                     let world_point = match event_to_point(
                         &move_canvas,
                         &event,
@@ -993,7 +1014,7 @@ pub fn run() -> Result<(), JsValue> {
                             }
                         }
                         SelectMode::Idle => {
-                            if selection_hit_test(&state, screen_x, screen_y).is_some() {
+                            if hit.is_some() {
                                 set_canvas_mode(&state.canvas, Tool::Select, false);
                             }
                         }

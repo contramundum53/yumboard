@@ -132,22 +132,4 @@ impl State {
             _ => None,
         }
     }
-
-    pub fn lasso_points(&self) -> &[Point] {
-        match &self.mode {
-            Mode::Select(select) => match &select.mode {
-                SelectMode::Lasso { points } => points,
-                _ => &[],
-            },
-            _ => &[],
-        }
-    }
-
-    pub fn selected_ids(&self) -> &[String] {
-        match &self.mode {
-            Mode::Select(select) => &select.selected_ids,
-            _ => &[],
-        }
-    }
-
 }

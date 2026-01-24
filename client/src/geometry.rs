@@ -1,6 +1,6 @@
 use pfboard_shared::{Point, Stroke};
 
-use crate::state::{ScaleAxis, ScaleHandle, SelectionHit, State, STROKE_UNIT};
+use crate::state::{ScaleAxis, ScaleHandle, SelectState, SelectionHit, State, STROKE_UNIT};
 
 pub struct Bounds {
     pub min_x: f64,
@@ -22,16 +22,16 @@ pub fn world_to_screen(state: &State, point: Point) -> (f64, f64) {
     (x, y)
 }
 
-pub fn selection_bounds(state: &State) -> Option<Bounds> {
-    if state.selected_ids().is_empty() {
+pub fn selection_bounds(strokes: &[Stroke], select: &SelectState) -> Option<Bounds> {
+    if select.selected_ids.is_empty() {
         return None;
     }
     let mut min_x = f64::MAX;
     let mut min_y = f64::MAX;
     let mut max_x = f64::MIN;
     let mut max_y = f64::MIN;
-    for stroke in &state.strokes {
-        if !state.selected_ids().iter().any(|id| id == &stroke.id) {
+    for stroke in strokes {
+        if !select.selected_ids.iter().any(|id| id == &stroke.id) {
             continue;
         }
         for point in &stroke.points {
@@ -53,16 +53,21 @@ pub fn selection_bounds(state: &State) -> Option<Bounds> {
     }
 }
 
-pub fn selection_center(state: &State) -> Option<Point> {
-    let bounds = selection_bounds(state)?;
+pub fn selection_center(strokes: &[Stroke], select: &SelectState) -> Option<Point> {
+    let bounds = selection_bounds(strokes, select)?;
     Some(Point {
         x: ((bounds.min_x + bounds.max_x) / 2.0) as f32,
         y: ((bounds.min_y + bounds.max_y) / 2.0) as f32,
     })
 }
 
-pub fn selection_hit_test(state: &State, screen_x: f64, screen_y: f64) -> Option<SelectionHit> {
-    let bounds = selection_bounds(state)?;
+pub fn selection_hit_test(
+    state: &State,
+    select: &SelectState,
+    screen_x: f64,
+    screen_y: f64,
+) -> Option<SelectionHit> {
+    let bounds = selection_bounds(&state.strokes, select)?;
     let (left, top) = world_to_screen(
         state,
         Point {
@@ -183,11 +188,10 @@ pub fn angle_between(center: Point, point: Point) -> f64 {
     dy.atan2(dx)
 }
 
-pub fn selected_strokes(state: &State) -> Vec<Stroke> {
-    state
-        .strokes
+pub fn selected_strokes(strokes: &[Stroke], select: &SelectState) -> Vec<Stroke> {
+    strokes
         .iter()
-        .filter(|stroke| state.selected_ids().iter().any(|id| id == &stroke.id))
+        .filter(|stroke| select.selected_ids.iter().any(|id| id == &stroke.id))
         .cloned()
         .collect()
 }

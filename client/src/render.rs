@@ -2,7 +2,7 @@ use pfboard_shared::{Point, Stroke};
 use web_sys::CanvasRenderingContext2d;
 
 use crate::geometry::{selection_bounds, world_to_screen};
-use crate::state::{State, STROKE_UNIT};
+use crate::state::{Mode, SelectMode, SelectState, State, STROKE_UNIT};
 
 pub fn draw_dot(
     ctx: &CanvasRenderingContext2d,
@@ -95,11 +95,14 @@ pub fn redraw(state: &mut State) {
     for stroke in &state.strokes {
         draw_stroke(state, stroke);
     }
-    draw_selection_overlay(state);
+    if let Mode::Select(select) = &state.mode {
+        draw_selection_overlay(state, select);
+    }
 }
 
-pub fn draw_selection_overlay(state: &mut State) {
-    if state.selected_ids().is_empty() && state.lasso_points().is_empty() {
+pub fn draw_selection_overlay(state: &State, select: &SelectState) {
+    let has_lasso = matches!(&select.mode, SelectMode::Lasso { points } if !points.is_empty());
+    if select.selected_ids.is_empty() && !has_lasso {
         return;
     }
     let ctx = &state.ctx;
@@ -108,11 +111,11 @@ pub fn draw_selection_overlay(state: &mut State) {
     ctx.set_stroke_style_str("rgba(26, 31, 42, 0.65)");
     ctx.set_fill_style_str("rgba(26, 31, 42, 0.08)");
 
-    if !state.lasso_points().is_empty() {
+    if let SelectMode::Lasso { points } = &select.mode {
         let mut first = true;
         ctx.begin_path();
         let _ = ctx.set_line_dash(&js_sys::Array::of2(&4.into(), &6.into()));
-        for point in state.lasso_points() {
+        for point in points {
             let (x, y) = world_to_screen(state, *point);
             if first {
                 ctx.move_to(x, y);
@@ -125,7 +128,7 @@ pub fn draw_selection_overlay(state: &mut State) {
         let _ = ctx.set_line_dash(&js_sys::Array::new());
     }
 
-    if let Some(bounds) = selection_bounds(state) {
+    if let Some(bounds) = selection_bounds(&state.strokes, select) {
         let (left, top) = world_to_screen(
             state,
             Point {
