@@ -228,11 +228,14 @@ body {
   border-color: transparent;
 }
 
-.tool-icon {
+.icon-mask {
   width: 22px;
   height: 22px;
   display: block;
   pointer-events: none;
+  background-color: currentColor;
+  mask: var(--icon-url) center / contain no-repeat;
+  -webkit-mask: var(--icon-url) center / contain no-repeat;
 }
 
 .clear {
@@ -249,8 +252,6 @@ body {
 .clear-icon {
   width: 22px;
   height: 22px;
-  display: block;
-  pointer-events: none;
 }
 
 .hud {
