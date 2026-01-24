@@ -1921,11 +1921,12 @@ fn point_in_polygon(point: Point, polygon: &[Point]) -> bool {
 }
 
 fn build_pdf_html(state: &State, include_background: bool) -> String {
-    let size = if state.board_scale > 0.0 {
+    let scale = if state.board_scale > 0.0 {
         state.board_scale
     } else {
-        1.0
+        1000.0
     };
+    let (min_x, min_y, width, height) = pdf_bounds(state, scale);
     let mut paths = String::new();
     for stroke in &state.strokes {
         if stroke.points.is_empty() {
@@ -1933,8 +1934,8 @@ fn build_pdf_html(state: &State, include_background: bool) -> String {
         }
         let mut data = String::new();
         for (index, point) in stroke.points.iter().enumerate() {
-            let x = point.x as f64 * size;
-            let y = point.y as f64 * size;
+            let x = point.x as f64 * scale;
+            let y = point.y as f64 * scale;
             if index == 0 {
                 data.push_str(&format!("M {} {}", x, y));
             } else {
@@ -1949,8 +1950,8 @@ fn build_pdf_html(state: &State, include_background: bool) -> String {
         ));
         if stroke.points.len() == 1 {
             let p = stroke.points[0];
-            let cx = p.x as f64 * size;
-            let cy = p.y as f64 * size;
+            let cx = p.x as f64 * scale;
+            let cy = p.y as f64 * scale;
             let r = stroke.size as f64 / 2.0;
             paths.push_str(&format!(
                 "<circle cx=\"{}\" cy=\"{}\" r=\"{}\" fill=\"{}\" />",
@@ -1966,11 +1967,44 @@ fn build_pdf_html(state: &State, include_background: bool) -> String {
     };
 
     format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\" /><style>@page{{margin:0;}}body{{margin:0;}}svg{{width:100vw;height:100vh;}}</style></head><body><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {size} {size}\">{background}{paths}</svg><script>window.onload=()=>{{window.print();}}</script></body></html>",
-        size = size,
+        "<!doctype html><html><head><meta charset=\"utf-8\" /><style>@page{{margin:0;}}body{{margin:0;}}svg{{width:100vw;height:100vh;}}</style></head><body><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{min_x} {min_y} {width} {height}\" preserveAspectRatio=\"xMidYMid meet\">{background}{paths}</svg><script>window.onload=()=>{{window.print();}}</script></body></html>",
+        min_x = min_x,
+        min_y = min_y,
+        width = width,
+        height = height,
         background = background,
         paths = paths
     )
+}
+
+fn pdf_bounds(state: &State, scale: f64) -> (f64, f64, f64, f64) {
+    let mut min_x = f64::MAX;
+    let mut min_y = f64::MAX;
+    let mut max_x = f64::MIN;
+    let mut max_y = f64::MIN;
+    let mut max_size: f64 = 0.0;
+    for stroke in &state.strokes {
+        max_size = max_size.max(stroke.size as f64);
+        for point in &stroke.points {
+            let x = point.x as f64 * scale;
+            let y = point.y as f64 * scale;
+            min_x = min_x.min(x);
+            min_y = min_y.min(y);
+            max_x = max_x.max(x);
+            max_y = max_y.max(y);
+        }
+    }
+    if min_x == f64::MAX {
+        return (0.0, 0.0, scale, scale);
+    }
+    let pad = (max_size / 2.0).max(1.0);
+    min_x -= pad;
+    min_y -= pad;
+    max_x += pad;
+    max_y += pad;
+    let width = (max_x - min_x).max(1.0);
+    let height = (max_y - min_y).max(1.0);
+    (min_x, min_y, width, height)
 }
 
 fn open_print_window(document: &Document, html: &str) {
