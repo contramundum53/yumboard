@@ -158,7 +158,7 @@ body {
   width: 100%;
   height: 6px;
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  background: rgba(35, 45, 65, 0.18);
   outline: none;
 }
 
@@ -169,7 +169,7 @@ body {
   width: 8px;
   height: 130px;
   margin: 0;
-  background: linear-gradient(180deg, var(--accent), var(--accent-2));
+  background: rgba(35, 45, 65, 0.18);
 }
 
 .control input[type="range"]::-webkit-slider-thumb {
@@ -200,7 +200,7 @@ body {
 }
 
 .button-base {
-  padding: 10px 10px;
+  padding: 0px 0px;
   border-radius: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -272,8 +272,8 @@ body {
 }
 
 .icon-mask {
-  width: 22px;
-  height: 22px;
+  width: 32px;
+  height: 32px;
   display: block;
   pointer-events: none;
   background-color: currentColor;
@@ -283,18 +283,13 @@ body {
 
 .clear {
   border: none;
-  background: var(--accent);
+  background: #e22b2b;
   color: #fff;
 }
 
 .clear:hover {
   transform: translateY(-1px);
   box-shadow: 0 12px 25px rgba(228, 107, 73, 0.28);
-}
-
-.clear-icon {
-  width: 22px;
-  height: 22px;
 }
 
 .hud {
