@@ -163,7 +163,7 @@ body {
   top: 0;
   transform: translateX(-50%);
   background: rgba(35, 45, 65, 0.18);
-  clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
+  clip-path: polygon(50% 100%, 100% 0%, 0% 0%);
   pointer-events: none;
 }
 
