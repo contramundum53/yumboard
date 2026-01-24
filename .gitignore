@@ -3,3 +3,4 @@
 /client/pkg
 /public/pkg
 .DS_Store
+/sessions
