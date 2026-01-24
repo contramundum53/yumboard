@@ -37,7 +37,7 @@ enum SelectionMode {
 
 enum SelectionHit {
     Move,
-    Scale(ScaleAxis),
+    Scale(ScaleHandle),
     Rotate,
     Trash,
 }
@@ -47,6 +47,12 @@ enum ScaleAxis {
     Both,
     X,
     Y,
+}
+
+#[derive(Clone, Copy)]
+struct ScaleHandle {
+    axis: ScaleAxis,
+    anchor: Point,
 }
 
 struct Bounds {
@@ -83,6 +89,7 @@ struct State {
     lasso_points: Vec<Point>,
     selection_mode: SelectionMode,
     transform_center: Point,
+    transform_anchor: Point,
     transform_start: Point,
     transform_start_angle: f64,
     transform_snapshot: Vec<Stroke>,
@@ -152,6 +159,7 @@ pub fn run() -> Result<(), JsValue> {
         lasso_points: Vec::new(),
         selection_mode: SelectionMode::None,
         transform_center: Point { x: 0.0, y: 0.0 },
+        transform_anchor: Point { x: 0.0, y: 0.0 },
         transform_start: Point { x: 0.0, y: 0.0 },
         transform_start_angle: 0.0,
         transform_snapshot: Vec::new(),
@@ -616,17 +624,15 @@ pub fn run() -> Result<(), JsValue> {
                                 state.transform_snapshot = selected_strokes(&state);
                             }
                         }
-                        SelectionHit::Scale(axis) => {
-                            if let Some(center) = selection_center(&state) {
-                                let dx = (world_point.x - center.x) as f64;
-                                let dy = (world_point.y - center.y) as f64;
-                                if dx.abs() > f64::EPSILON || dy.abs() > f64::EPSILON {
-                                    state.selection_mode = SelectionMode::Scale;
-                                    state.transform_center = center;
-                                    state.transform_start = world_point;
-                                    state.transform_scale_axis = axis;
-                                    state.transform_snapshot = selected_strokes(&state);
-                                }
+                        SelectionHit::Scale(handle) => {
+                            let dx = (world_point.x - handle.anchor.x) as f64;
+                            let dy = (world_point.y - handle.anchor.y) as f64;
+                            if dx.abs() > f64::EPSILON || dy.abs() > f64::EPSILON {
+                                state.selection_mode = SelectionMode::Scale;
+                                state.transform_anchor = handle.anchor;
+                                state.transform_start = world_point;
+                                state.transform_scale_axis = handle.axis;
+                                state.transform_snapshot = selected_strokes(&state);
                             }
                         }
                         SelectionHit::Move => {
@@ -774,13 +780,13 @@ pub fn run() -> Result<(), JsValue> {
                         }
                     }
                     SelectionMode::Scale => {
-                        let center = state.transform_center;
+                        let anchor = state.transform_anchor;
                         let start = state.transform_start;
                         let axis = state.transform_scale_axis;
-                        let dx0 = (start.x - center.x) as f64;
-                        let dy0 = (start.y - center.y) as f64;
-                        let dx1 = (world_point.x - center.x) as f64;
-                        let dy1 = (world_point.y - center.y) as f64;
+                        let dx0 = (start.x - anchor.x) as f64;
+                        let dy0 = (start.y - anchor.y) as f64;
+                        let dx1 = (world_point.x - anchor.x) as f64;
+                        let dy1 = (world_point.y - anchor.y) as f64;
                         let mut sx = if dx0.abs() > f64::EPSILON {
                             (dx1 / dx0).abs()
                         } else {
@@ -800,7 +806,7 @@ pub fn run() -> Result<(), JsValue> {
                         sy = sy.max(0.05);
                         let updated = apply_scale_xy(
                             &state.transform_snapshot,
-                            center,
+                            anchor,
                             sx,
                             sy,
                         );
@@ -1098,7 +1104,26 @@ fn websocket_url(window: &Window) -> Result<String, JsValue> {
     let protocol = location.protocol()?;
     let host = location.host()?;
     let scheme = if protocol == "https:" { "wss" } else { "ws" };
-    Ok(format!("{scheme}://{host}/ws"))
+    let session_id = session_id_from_location(&location);
+    if let Some(session_id) = session_id {
+        Ok(format!("{scheme}://{host}/ws/{session_id}"))
+    } else {
+        Ok(format!("{scheme}://{host}/ws"))
+    }
+}
+
+fn session_id_from_location(location: &web_sys::Location) -> Option<String> {
+    let path = location.pathname().ok()?;
+    let mut parts = path.trim_matches('/').split('/');
+    if parts.next()? != "s" {
+        return None;
+    }
+    let session_id = parts.next()?;
+    if session_id.is_empty() {
+        None
+    } else {
+        Some(session_id.to_string())
+    }
 }
 
 fn update_size_label(input: &HtmlInputElement, value: &HtmlSpanElement) {
@@ -1426,30 +1451,78 @@ fn selection_hit_test(state: &State, screen_x: f64, screen_y: f64) -> Option<Sel
         return Some(SelectionHit::Rotate);
     }
     if hit_rect(screen_x, screen_y, left, top, handle) {
-        return Some(SelectionHit::Scale(ScaleAxis::Both));
+        return Some(SelectionHit::Scale(ScaleHandle {
+            axis: ScaleAxis::Both,
+            anchor: Point {
+                x: bounds.max_x as f32,
+                y: bounds.max_y as f32,
+            },
+        }));
     }
     if hit_rect(screen_x, screen_y, right, top, handle) {
-        return Some(SelectionHit::Scale(ScaleAxis::Both));
+        return Some(SelectionHit::Scale(ScaleHandle {
+            axis: ScaleAxis::Both,
+            anchor: Point {
+                x: bounds.min_x as f32,
+                y: bounds.max_y as f32,
+            },
+        }));
     }
     if hit_rect(screen_x, screen_y, left, bottom, handle) {
-        return Some(SelectionHit::Scale(ScaleAxis::Both));
+        return Some(SelectionHit::Scale(ScaleHandle {
+            axis: ScaleAxis::Both,
+            anchor: Point {
+                x: bounds.max_x as f32,
+                y: bounds.min_y as f32,
+            },
+        }));
     }
     if hit_rect(screen_x, screen_y, right, bottom, handle) {
-        return Some(SelectionHit::Scale(ScaleAxis::Both));
+        return Some(SelectionHit::Scale(ScaleHandle {
+            axis: ScaleAxis::Both,
+            anchor: Point {
+                x: bounds.min_x as f32,
+                y: bounds.min_y as f32,
+            },
+        }));
     }
     let mid_top_x = (left + right) / 2.0;
     let mid_left_y = (top + bottom) / 2.0;
     if hit_rect(screen_x, screen_y, mid_top_x, top, handle) {
-        return Some(SelectionHit::Scale(ScaleAxis::Y));
+        return Some(SelectionHit::Scale(ScaleHandle {
+            axis: ScaleAxis::Y,
+            anchor: Point {
+                x: ((bounds.min_x + bounds.max_x) / 2.0) as f32,
+                y: bounds.max_y as f32,
+            },
+        }));
     }
     if hit_rect(screen_x, screen_y, mid_top_x, bottom, handle) {
-        return Some(SelectionHit::Scale(ScaleAxis::Y));
+        return Some(SelectionHit::Scale(ScaleHandle {
+            axis: ScaleAxis::Y,
+            anchor: Point {
+                x: ((bounds.min_x + bounds.max_x) / 2.0) as f32,
+                y: bounds.min_y as f32,
+            },
+        }));
     }
     if hit_rect(screen_x, screen_y, left, mid_left_y, handle) {
-        return Some(SelectionHit::Scale(ScaleAxis::X));
+        return Some(SelectionHit::Scale(ScaleHandle {
+            axis: ScaleAxis::X,
+            anchor: Point {
+                x: bounds.max_x as f32,
+                y: ((bounds.min_y + bounds.max_y) / 2.0) as f32,
+            },
+        }));
     }
     if hit_rect(screen_x, screen_y, right, mid_left_y, handle) {
-        return Some(SelectionHit::Scale(ScaleAxis::X));
+        return Some(SelectionHit::Scale(ScaleHandle {
+            axis: ScaleAxis::X,
+            anchor: Point {
+                x: bounds.min_x as f32,
+                y: ((bounds.min_y + bounds.max_y) / 2.0) as f32,
+            },
+        }));
     }
     if screen_x >= left && screen_x <= right && screen_y >= top && screen_y <= bottom {
         return Some(SelectionHit::Move);
