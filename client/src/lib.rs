@@ -233,6 +233,7 @@ pub fn run() -> Result<(), JsValue> {
                 }
                 ServerMessage::StrokeReplace { stroke } => {
                     replace_stroke_local(&mut state, stroke);
+                    redraw(&mut state);
                 }
             }
         });
