@@ -53,6 +53,8 @@ pub enum ClientMessage {
     StrokeReplace { stroke: Stroke },
     #[serde(rename = "remove")]
     Remove { ids: Vec<String> },
+    #[serde(rename = "load")]
+    Load { strokes: Vec<Stroke> },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

@@ -5,12 +5,18 @@ use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
-    CanvasRenderingContext2d, Document, Element, Event, HtmlButtonElement, HtmlCanvasElement,
-    HtmlElement, HtmlInputElement, HtmlSpanElement, KeyboardEvent, MessageEvent, PointerEvent,
-    WebSocket, Window,
+    CanvasRenderingContext2d, Document, Element, Event, FileReader, HtmlAnchorElement,
+    HtmlButtonElement, HtmlCanvasElement, HtmlElement, HtmlInputElement, HtmlSpanElement,
+    KeyboardEvent, MessageEvent, PointerEvent, ProgressEvent, WebSocket, Window,
 };
 
 use pfboard_shared::{ClientMessage, Point, ServerMessage, Stroke};
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SaveData {
+    version: u8,
+    strokes: Vec<Stroke>,
+}
 
 #[derive(Clone, Copy, PartialEq)]
 enum Tool {
@@ -97,6 +103,9 @@ pub fn run() -> Result<(), JsValue> {
     let size_input: HtmlInputElement = get_element(&document, "size")?;
     let size_value: HtmlSpanElement = get_element(&document, "sizeValue")?;
     let clear_button: HtmlButtonElement = get_element(&document, "clear")?;
+    let save_button: HtmlButtonElement = get_element(&document, "save")?;
+    let load_button: HtmlButtonElement = get_element(&document, "load")?;
+    let load_file: HtmlInputElement = get_element(&document, "loadFile")?;
     let pen_button: HtmlButtonElement = get_element(&document, "pen")?;
     let lasso_button: HtmlButtonElement = get_element(&document, "lasso")?;
     let eraser_button: HtmlButtonElement = get_element(&document, "eraser")?;
@@ -426,6 +435,100 @@ pub fn run() -> Result<(), JsValue> {
         });
         clear_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
+    }
+
+    {
+        let save_state = state.clone();
+        let document = document.clone();
+        let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
+            let strokes = { save_state.borrow().strokes.clone() };
+            let payload = SaveData {
+                version: 1,
+                strokes,
+            };
+            let Ok(json) = serde_json::to_string(&payload) else {
+                return;
+            };
+            let encoded = js_sys::encode_uri_component(&json);
+            let href = format!("data:application/json;charset=utf-8,{encoded}");
+            if let Ok(element) = document.create_element("a") {
+                if let Ok(anchor) = element.dyn_into::<HtmlAnchorElement>() {
+                    anchor.set_href(&href);
+                    anchor.set_download("pfboard.json");
+                    anchor.click();
+                }
+            }
+        });
+        save_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
+        onclick.forget();
+    }
+
+    {
+        let load_file = load_file.clone();
+        let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
+            load_file.set_value("");
+            load_file.click();
+        });
+        load_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
+        onclick.forget();
+    }
+
+    {
+        let load_state = state.clone();
+        let load_socket = socket.clone();
+        let onload = std::rc::Rc::new(RefCell::new(None));
+        let onload_clone = onload.clone();
+        let load_state = load_state.clone();
+        let load_socket = load_socket.clone();
+        *onload.borrow_mut() = Some(Closure::<dyn FnMut(ProgressEvent)>::new(
+            move |event: ProgressEvent| {
+            let target = match event.target() {
+                Some(target) => target,
+                None => return,
+            };
+            let reader: FileReader = match target.dyn_into() {
+                Ok(reader) => reader,
+                Err(_) => return,
+            };
+            let Some(result) = reader.result().ok() else {
+                return;
+            };
+            let Some(text) = result.as_string() else {
+                return;
+            };
+            let Ok(data) = serde_json::from_str::<SaveData>(&text) else {
+                return;
+            };
+            {
+                let mut state = load_state.borrow_mut();
+                adopt_strokes(&mut state, data.strokes.clone());
+            }
+            send_message(&load_socket, &ClientMessage::Load { strokes: data.strokes });
+        },
+        ));
+
+        let load_file_cb = load_file.clone();
+        let onchange = Closure::<dyn FnMut(Event)>::new(move |_| {
+            let files = load_file_cb.files();
+            let file = files.and_then(|list| list.get(0));
+            let Some(file) = file else {
+                return;
+            };
+            let reader = match FileReader::new() {
+                Ok(reader) => reader,
+                Err(_) => return,
+            };
+            if let Some(handler) = onload_clone.borrow().as_ref() {
+                reader.set_onload(Some(handler.as_ref().unchecked_ref()));
+            }
+            let _ = reader.read_as_text(&file);
+        });
+        load_file.add_event_listener_with_callback("change", onchange.as_ref().unchecked_ref())?;
+        let handler = onload.borrow_mut().take();
+        if let Some(handler) = handler {
+            handler.forget();
+        }
+        onchange.forget();
     }
 
     {
@@ -1659,6 +1762,9 @@ fn adopt_strokes(state: &mut State, strokes: Vec<Stroke>) {
     }
     state.strokes = sanitized;
     state.active_ids.clear();
+    state.selected_ids.clear();
+    state.lasso_points.clear();
+    state.selection_mode = SelectionMode::None;
     redraw(state);
 }
 

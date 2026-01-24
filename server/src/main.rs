@@ -432,6 +432,21 @@ async fn apply_client_message(
                 .collect::<Vec<_>>();
             Some((messages, false))
         }
+        ClientMessage::Load { strokes } => {
+            let strokes = sanitize_strokes(strokes);
+            {
+                let mut stored = state.strokes.write().await;
+                *stored = strokes.clone();
+            }
+            state.active_ids.write().await.clear();
+            state.owners.write().await.clear();
+            let mut histories = state.histories.write().await;
+            for history in histories.values_mut() {
+                history.undo.clear();
+                history.redo.clear();
+            }
+            Some((vec![ServerMessage::Sync { strokes }], true))
+        }
     }
 }
 
@@ -556,6 +571,13 @@ fn sanitize_stroke(mut stroke: Stroke) -> Option<Stroke> {
         return None;
     }
     Some(stroke)
+}
+
+fn sanitize_strokes(strokes: Vec<Stroke>) -> Vec<Stroke> {
+    strokes
+        .into_iter()
+        .filter_map(sanitize_stroke)
+        .collect()
 }
 
 async fn replace_stroke(state: &AppState, stroke: Stroke) -> Option<Stroke> {
