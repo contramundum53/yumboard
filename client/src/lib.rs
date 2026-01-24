@@ -251,10 +251,7 @@ pub fn run() -> Result<(), JsValue> {
                 move_stroke(&mut state, &id, point);
             }
 
-            send_message(
-                &move_socket,
-                &ClientMessage::StrokeMove { id, point },
-            );
+            send_message(&move_socket, &ClientMessage::StrokeMove { id, point });
         });
         canvas.add_event_listener_with_callback("pointermove", onmove.as_ref().unchecked_ref())?;
         onmove.forget();
@@ -292,7 +289,8 @@ pub fn run() -> Result<(), JsValue> {
             send_message(&stop_socket, &ClientMessage::StrokeEnd { id });
         });
         canvas.add_event_listener_with_callback("pointerup", onstop.as_ref().unchecked_ref())?;
-        canvas.add_event_listener_with_callback("pointercancel", onstop.as_ref().unchecked_ref())?;
+        canvas
+            .add_event_listener_with_callback("pointercancel", onstop.as_ref().unchecked_ref())?;
         canvas.add_event_listener_with_callback("pointerleave", onstop.as_ref().unchecked_ref())?;
         onstop.forget();
     }
@@ -331,9 +329,7 @@ fn resize_canvas(window: &Window, state: &mut State) {
     let dpr = window.device_pixel_ratio();
     state.canvas.set_width((rect.width() * dpr) as u32);
     state.canvas.set_height((rect.height() * dpr) as u32);
-    let _ = state
-        .ctx
-        .set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
+    let _ = state.ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
     state.board_width = rect.width();
     state.board_height = rect.height();
     redraw(state);
