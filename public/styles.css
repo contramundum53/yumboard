@@ -162,8 +162,9 @@ body {
 }
 
 #size {
-  -webkit-appearance: slider-vertical;
-  writing-mode: bt-lr;
+  -webkit-appearance: none;
+  writing-mode: vertical-lr;
+  direction: rtl;
   width: 8px;
   height: 130px;
   margin: 0;
