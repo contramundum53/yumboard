@@ -6,8 +6,8 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
     CanvasRenderingContext2d, Document, Element, Event, FileReader, HtmlAnchorElement,
-    HtmlButtonElement, HtmlCanvasElement, HtmlElement, HtmlInputElement, HtmlSpanElement,
-    KeyboardEvent, MessageEvent, PointerEvent, ProgressEvent, WebSocket, Window,
+    HtmlButtonElement, HtmlCanvasElement, HtmlElement, HtmlIFrameElement, HtmlInputElement,
+    HtmlSpanElement, KeyboardEvent, MessageEvent, PointerEvent, ProgressEvent, WebSocket, Window,
 };
 
 use pfboard_shared::{ClientMessage, Point, ServerMessage, Stroke};
@@ -1926,13 +1926,31 @@ fn build_pdf_html(state: &State, include_background: bool) -> String {
 }
 
 fn open_print_window(document: &Document, html: &str) {
-    let window = match document.default_view() {
-        Some(window) => window,
+    let iframe: HtmlIFrameElement = match document
+        .create_element("iframe")
+        .ok()
+        .and_then(|element| element.dyn_into::<HtmlIFrameElement>().ok())
+    {
+        Some(frame) => frame,
         None => return,
     };
-    let encoded = js_sys::encode_uri_component(html);
-    let url = format!("data:text/html;charset=utf-8,{encoded}");
-    let _ = window.open_with_url_and_target(&url, "_blank");
+    let _ = iframe.set_attribute(
+        "style",
+        "position:fixed;right:0;bottom:0;width:0;height:0;border:0;",
+    );
+    iframe.set_srcdoc(html);
+    if let Some(body) = document.body() {
+        let _ = body.append_child(&iframe);
+    }
+    let iframe_for_load = iframe.clone();
+    let onload = Closure::<dyn FnMut(Event)>::new(move |_| {
+        if let Some(window) = iframe_for_load.content_window() {
+            let _ = window.focus();
+            let _ = window.print();
+        }
+    });
+    iframe.set_onload(Some(onload.as_ref().unchecked_ref()));
+    onload.forget();
 }
 
 fn start_stroke(state: &mut State, id: String, color: String, size: f32, point: Point) {
