@@ -26,6 +26,9 @@ struct State {
     active_ids: HashSet<String>,
     board_width: f64,
     board_height: f64,
+    board_scale: f64,
+    board_offset_x: f64,
+    board_offset_y: f64,
     current_id: Option<String>,
     drawing: bool,
     erasing: bool,
@@ -77,6 +80,9 @@ pub fn run() -> Result<(), JsValue> {
         active_ids: HashSet::new(),
         board_width: 0.0,
         board_height: 0.0,
+        board_scale: 0.0,
+        board_offset_x: 0.0,
+        board_offset_y: 0.0,
         current_id: None,
         drawing: false,
         erasing: false,
@@ -577,6 +583,9 @@ fn resize_canvas(window: &Window, state: &mut State) {
     let _ = state.ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
     state.board_width = rect.width();
     state.board_height = rect.height();
+    state.board_scale = rect.width().min(rect.height());
+    state.board_offset_x = (rect.width() - state.board_scale) / 2.0;
+    state.board_offset_y = (rect.height() - state.board_scale) / 2.0;
     redraw(state);
 }
 
@@ -590,8 +599,14 @@ fn event_to_point(
     if rect.width() <= 0.0 || rect.height() <= 0.0 {
         return None;
     }
-    let x = (event.client_x() as f64 - rect.left() - pan_x) / rect.width();
-    let y = (event.client_y() as f64 - rect.top() - pan_y) / rect.height();
+    let scale = rect.width().min(rect.height());
+    if scale <= 0.0 {
+        return None;
+    }
+    let offset_x = (rect.width() - scale) / 2.0;
+    let offset_y = (rect.height() - scale) / 2.0;
+    let x = (event.client_x() as f64 - rect.left() - pan_x - offset_x) / scale;
+    let y = (event.client_y() as f64 - rect.top() - pan_y - offset_y) / scale;
     normalize_point(Point {
         x: x as f32,
         y: y as f32,
@@ -622,16 +637,17 @@ fn sanitize_size(size: f32) -> f32 {
 
 fn draw_dot(
     ctx: &CanvasRenderingContext2d,
-    board_width: f64,
-    board_height: f64,
+    board_scale: f64,
+    board_offset_x: f64,
+    board_offset_y: f64,
     pan_x: f64,
     pan_y: f64,
     point: Point,
     color: &str,
     size: f32,
 ) {
-    let x = point.x as f64 * board_width + pan_x;
-    let y = point.y as f64 * board_height + pan_y;
+    let x = point.x as f64 * board_scale + board_offset_x + pan_x;
+    let y = point.y as f64 * board_scale + board_offset_y + pan_y;
     ctx.set_fill_style_str(color);
     ctx.begin_path();
     let _ = ctx.arc(x, y, size as f64 / 2.0, 0.0, std::f64::consts::PI * 2.0);
@@ -640,8 +656,9 @@ fn draw_dot(
 
 fn draw_segment(
     ctx: &CanvasRenderingContext2d,
-    board_width: f64,
-    board_height: f64,
+    board_scale: f64,
+    board_offset_x: f64,
+    board_offset_y: f64,
     pan_x: f64,
     pan_y: f64,
     from: Point,
@@ -649,10 +666,10 @@ fn draw_segment(
     color: &str,
     size: f32,
 ) {
-    let from_x = from.x as f64 * board_width + pan_x;
-    let from_y = from.y as f64 * board_height + pan_y;
-    let to_x = to.x as f64 * board_width + pan_x;
-    let to_y = to.y as f64 * board_height + pan_y;
+    let from_x = from.x as f64 * board_scale + board_offset_x + pan_x;
+    let from_y = from.y as f64 * board_scale + board_offset_y + pan_y;
+    let to_x = to.x as f64 * board_scale + board_offset_x + pan_x;
+    let to_y = to.y as f64 * board_scale + board_offset_y + pan_y;
 
     ctx.set_stroke_style_str(color);
     ctx.set_line_width(size as f64);
@@ -669,8 +686,9 @@ fn draw_stroke(state: &State, stroke: &Stroke) {
     if stroke.points.len() == 1 {
         draw_dot(
             &state.ctx,
-            state.board_width,
-            state.board_height,
+            state.board_scale,
+            state.board_offset_x,
+            state.board_offset_y,
             state.pan_x,
             state.pan_y,
             stroke.points[0],
@@ -682,8 +700,9 @@ fn draw_stroke(state: &State, stroke: &Stroke) {
     for i in 1..stroke.points.len() {
         draw_segment(
             &state.ctx,
-            state.board_width,
-            state.board_height,
+            state.board_scale,
+            state.board_offset_x,
+            state.board_offset_y,
             state.pan_x,
             state.pan_y,
             stroke.points[i - 1],
@@ -720,8 +739,9 @@ fn start_stroke(state: &mut State, id: String, color: String, size: f32, point: 
     state.active_ids.insert(id);
     draw_dot(
         &state.ctx,
-        state.board_width,
-        state.board_height,
+        state.board_scale,
+        state.board_offset_x,
+        state.board_offset_y,
         state.pan_x,
         state.pan_y,
         point,
@@ -752,8 +772,9 @@ fn move_stroke(state: &mut State, id: &str, point: Point) {
         if from == to {
             draw_dot(
                 &state.ctx,
-                state.board_width,
-                state.board_height,
+                state.board_scale,
+                state.board_offset_x,
+                state.board_offset_y,
                 state.pan_x,
                 state.pan_y,
                 to,
@@ -763,8 +784,9 @@ fn move_stroke(state: &mut State, id: &str, point: Point) {
         } else {
             draw_segment(
                 &state.ctx,
-                state.board_width,
-                state.board_height,
+                state.board_scale,
+                state.board_offset_x,
+                state.board_offset_y,
                 state.pan_x,
                 state.pan_y,
                 from,
@@ -805,11 +827,11 @@ fn restore_stroke(state: &mut State, mut stroke: Stroke) {
 }
 
 fn erase_hits_at_point(state: &mut State, point: Point) -> Vec<String> {
-    if state.board_width <= 0.0 || state.board_height <= 0.0 {
+    if state.board_scale <= 0.0 {
         return Vec::new();
     }
-    let px = point.x as f64 * state.board_width;
-    let py = point.y as f64 * state.board_height;
+    let px = point.x as f64 * state.board_scale + state.board_offset_x + state.pan_x;
+    let py = point.y as f64 * state.board_scale + state.board_offset_y + state.pan_y;
     let mut removed = Vec::new();
     let mut index = state.strokes.len();
 
@@ -819,7 +841,16 @@ fn erase_hits_at_point(state: &mut State, point: Point) -> Vec<String> {
         if state.erase_hits.contains(&stroke.id) {
             continue;
         }
-        if stroke_hit(stroke, px, py, state.board_width, state.board_height) {
+        if stroke_hit(
+            stroke,
+            px,
+            py,
+            state.board_scale,
+            state.board_offset_x,
+            state.board_offset_y,
+            state.pan_x,
+            state.pan_y,
+        ) {
             let id = stroke.id.clone();
             state.strokes.remove(index);
             state.active_ids.remove(&id);
@@ -835,15 +866,24 @@ fn erase_hits_at_point(state: &mut State, point: Point) -> Vec<String> {
     removed
 }
 
-fn stroke_hit(stroke: &Stroke, px: f64, py: f64, width: f64, height: f64) -> bool {
+fn stroke_hit(
+    stroke: &Stroke,
+    px: f64,
+    py: f64,
+    scale: f64,
+    offset_x: f64,
+    offset_y: f64,
+    pan_x: f64,
+    pan_y: f64,
+) -> bool {
     if stroke.points.is_empty() {
         return false;
     }
     let threshold = (stroke.size as f64 / 2.0).max(6.0);
     if stroke.points.len() == 1 {
         let point = stroke.points[0];
-        let dx = point.x as f64 * width - px;
-        let dy = point.y as f64 * height - py;
+        let dx = point.x as f64 * scale + offset_x + pan_x - px;
+        let dy = point.y as f64 * scale + offset_y + pan_y - py;
         return dx * dx + dy * dy <= threshold * threshold;
     }
     for window in stroke.points.windows(2) {
@@ -852,10 +892,10 @@ fn stroke_hit(stroke: &Stroke, px: f64, py: f64, width: f64, height: f64) -> boo
         let distance = distance_to_segment(
             px,
             py,
-            start.x as f64 * width,
-            start.y as f64 * height,
-            end.x as f64 * width,
-            end.y as f64 * height,
+            start.x as f64 * scale + offset_x + pan_x,
+            start.y as f64 * scale + offset_y + pan_y,
+            end.x as f64 * scale + offset_x + pan_x,
+            end.y as f64 * scale + offset_y + pan_y,
         );
         if distance <= threshold {
             return true;
