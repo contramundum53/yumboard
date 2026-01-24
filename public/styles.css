@@ -147,10 +147,24 @@ body {
 }
 
 .range-control {
+  position: relative;
   grid-template-columns: 1fr;
   align-items: center;
   justify-items: center;
   gap: 8px;
+}
+
+.range-control::before {
+  content: "";
+  position: absolute;
+  width: 34px;
+  height: 130px;
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+  background: rgba(35, 45, 65, 0.18);
+  clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
+  pointer-events: none;
 }
 
 .control input[type="range"] {
@@ -171,11 +185,9 @@ body {
   margin: 0 auto;
   padding: 0;
   background-color: transparent;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 200'%3E%3Cpath d='M50 200 L100 0 L0 0 Z' fill='rgba(35,45,65,0.18)'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: center;
-  background-size: 100% 100%;
   overflow: visible;
+  position: relative;
+  z-index: 1;
 }
 
 #size::-webkit-slider-runnable-track {
