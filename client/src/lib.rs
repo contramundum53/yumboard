@@ -346,11 +346,27 @@ pub fn run() -> Result<(), JsValue> {
                 let _ = down_canvas.set_pointer_capture(event.pointer_id());
                 return;
             }
-            let (pan_x, pan_y, zoom) = {
+            let (pan_x, pan_y, zoom, board_scale, offset_x, offset_y) = {
                 let state = down_state.borrow();
-                (state.pan_x, state.pan_y, state.zoom)
+                (
+                    state.pan_x,
+                    state.pan_y,
+                    state.zoom,
+                    state.board_scale,
+                    state.board_offset_x,
+                    state.board_offset_y,
+                )
             };
-            let point = match event_to_point(&down_canvas, &event, pan_x, pan_y, zoom) {
+            let point = match event_to_point(
+                &down_canvas,
+                &event,
+                pan_x,
+                pan_y,
+                zoom,
+                board_scale,
+                offset_x,
+                offset_y,
+            ) {
                 Some(point) => point,
                 None => return,
             };
@@ -400,11 +416,27 @@ pub fn run() -> Result<(), JsValue> {
         let onmove = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             let tool = { move_state.borrow().tool };
             if tool == Tool::Erase {
-                let (pan_x, pan_y, zoom) = {
+                let (pan_x, pan_y, zoom, board_scale, offset_x, offset_y) = {
                     let state = move_state.borrow();
-                    (state.pan_x, state.pan_y, state.zoom)
+                    (
+                        state.pan_x,
+                        state.pan_y,
+                        state.zoom,
+                        state.board_scale,
+                        state.board_offset_x,
+                        state.board_offset_y,
+                    )
                 };
-                let point = match event_to_point(&move_canvas, &event, pan_x, pan_y, zoom) {
+                let point = match event_to_point(
+                    &move_canvas,
+                    &event,
+                    pan_x,
+                    pan_y,
+                    zoom,
+                    board_scale,
+                    offset_x,
+                    offset_y,
+                ) {
                     Some(point) => point,
                     None => return,
                 };
@@ -445,9 +477,16 @@ pub fn run() -> Result<(), JsValue> {
                 }
                 return;
             }
-            let (pan_x, pan_y, zoom) = {
+            let (pan_x, pan_y, zoom, board_scale, offset_x, offset_y) = {
                 let state = move_state.borrow();
-                (state.pan_x, state.pan_y, state.zoom)
+                (
+                    state.pan_x,
+                    state.pan_y,
+                    state.zoom,
+                    state.board_scale,
+                    state.board_offset_x,
+                    state.board_offset_y,
+                )
             };
             let (id, point, last_point) = {
                 let state = move_state.borrow();
@@ -458,7 +497,16 @@ pub fn run() -> Result<(), JsValue> {
                     Some(id) => id,
                     None => return,
                 };
-                let point = match event_to_point(&move_canvas, &event, pan_x, pan_y, zoom) {
+                let point = match event_to_point(
+                    &move_canvas,
+                    &event,
+                    pan_x,
+                    pan_y,
+                    zoom,
+                    board_scale,
+                    offset_x,
+                    offset_y,
+                ) {
                     Some(point) => point,
                     None => return,
                 };
@@ -665,20 +713,20 @@ fn event_to_point(
     pan_x: f64,
     pan_y: f64,
     zoom: f64,
+    board_scale: f64,
+    board_offset_x: f64,
+    board_offset_y: f64,
 ) -> Option<Point> {
     let rect = canvas.get_bounding_client_rect();
     if rect.width() <= 0.0 || rect.height() <= 0.0 {
         return None;
     }
-    let scale = rect.width().min(rect.height());
-    if scale <= 0.0 {
+    if board_scale <= 0.0 {
         return None;
     }
-    let scale = scale * zoom;
-    let offset_x = (rect.width() - scale) / 2.0;
-    let offset_y = (rect.height() - scale) / 2.0;
-    let x = (event.client_x() as f64 - rect.left() - pan_x - offset_x) / scale;
-    let y = (event.client_y() as f64 - rect.top() - pan_y - offset_y) / scale;
+    let scale = board_scale * zoom;
+    let x = (event.client_x() as f64 - rect.left() - pan_x - board_offset_x) / scale;
+    let y = (event.client_y() as f64 - rect.top() - pan_y - board_offset_y) / scale;
     normalize_point(Point {
         x: x as f32,
         y: y as f32,
