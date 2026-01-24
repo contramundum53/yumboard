@@ -30,15 +30,23 @@ use crate::palette::{palette_action_from_event, render_palette, PaletteAction};
 use crate::persistence::{build_pdf_html, open_print_window, parse_load_payload, SaveData};
 use crate::render::redraw;
 use crate::state::{
-    DrawMode, DrawState, EraseMode, Mode, PanMode, ScaleAxis, SelectMode, SelectState,
-    SelectionHit, State, DEFAULT_PALETTE,
+    DrawMode, DrawState, EraseMode, LoadingState, Mode, PanMode, ScaleAxis, SelectMode,
+    SelectState, SelectionHit, State, DEFAULT_PALETTE,
 };
 use crate::util::make_id;
 
 fn palette_selected(mode: &Mode) -> Option<usize> {
     match mode {
         Mode::Draw(draw) => Some(draw.palette_selected),
+        Mode::Loading(loading) => palette_selected(loading.previous.as_ref()),
         _ => None,
+    }
+}
+
+fn mode_for_buttons(mode: &Mode) -> &Mode {
+    match mode {
+        Mode::Loading(loading) => loading.previous.as_ref(),
+        _ => mode,
     }
 }
 
@@ -49,13 +57,34 @@ fn sync_tool_ui(
     lasso_button: &HtmlButtonElement,
     dragging: bool,
 ) {
-    let is_pan = matches!(state.mode, Mode::Pan(_));
-    let is_erase = matches!(state.mode, Mode::Erase(_));
-    let is_select = matches!(state.mode, Mode::Select(_));
+    let mode = mode_for_buttons(&state.mode);
+    let is_pan = matches!(mode, Mode::Pan(_));
+    let is_erase = matches!(mode, Mode::Erase(_));
+    let is_select = matches!(mode, Mode::Select(_));
     set_tool_button(pan_button, is_pan);
     set_tool_button(eraser_button, is_erase);
     set_tool_button(lasso_button, is_select);
     set_canvas_mode(&state.canvas, &state.mode, dragging);
+}
+
+fn take_loading_previous(state: &mut State) -> Option<Mode> {
+    let placeholder = Mode::Pan(PanMode::Idle);
+    match std::mem::replace(&mut state.mode, placeholder) {
+        Mode::Loading(loading) => {
+            let LoadingState {
+                previous,
+                reader,
+                onload,
+            } = loading;
+            let _ = reader;
+            let _ = onload;
+            Some(*previous)
+        }
+        other => {
+            state.mode = other;
+            None
+        }
+    }
 }
 
 #[wasm_bindgen(start)]
@@ -101,8 +130,6 @@ pub fn run() -> Result<(), JsValue> {
         ctx,
         strokes: Vec::new(),
         active_ids: HashSet::new(),
-        load_reader: None,
-        load_onload: None,
         board_width: 0.0,
         board_height: 0.0,
         board_offset_x: 0.0,
@@ -312,6 +339,9 @@ pub fn run() -> Result<(), JsValue> {
         let document = document.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = tool_state.borrow_mut();
+            if matches!(state.mode, Mode::Loading(_)) {
+                return;
+            }
             state.mode = Mode::Erase(EraseMode::Idle);
             sync_tool_ui(&state, &pan_button_cb, &eraser_button_cb, &lasso_button_cb, false);
             render_palette(
@@ -335,6 +365,9 @@ pub fn run() -> Result<(), JsValue> {
         let document = document.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = tool_state.borrow_mut();
+            if matches!(state.mode, Mode::Loading(_)) {
+                return;
+            }
             state.mode = Mode::Select(SelectState {
                 selected_ids: Vec::new(),
                 mode: SelectMode::Idle,
@@ -360,6 +393,9 @@ pub fn run() -> Result<(), JsValue> {
         let document = document.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = tool_state.borrow_mut();
+            if matches!(state.mode, Mode::Loading(_)) {
+                return;
+            }
             state.mode = Mode::Pan(PanMode::Idle);
             sync_tool_ui(&state, &pan_button_cb, &eraser_button_cb, &lasso_button_cb, false);
             render_palette(
@@ -388,6 +424,9 @@ pub fn run() -> Result<(), JsValue> {
                 None => return,
             };
             let mut state = palette_state.borrow_mut();
+            if matches!(state.mode, Mode::Loading(_)) {
+                return;
+            }
             match action {
                 PaletteAction::Add => {
                     let color = color_input.value();
@@ -595,52 +634,92 @@ pub fn run() -> Result<(), JsValue> {
     }
 
     {
-        let load_state_onload = state.clone();
-        let load_socket_onload = socket.clone();
-        let onload = Closure::<dyn FnMut(ProgressEvent)>::new(move |event: ProgressEvent| {
-            let target = match event.target() {
-                Some(target) => target,
-                None => return,
-            };
-            let reader: FileReader = match target.dyn_into() {
-                Ok(reader) => reader,
-                Err(_) => return,
-            };
-            let Some(result) = reader.result().ok() else {
-                return;
-            };
-            let Some(text) = result.as_string() else {
-                return;
-            };
-            let Some(strokes) = parse_load_payload(&text) else {
-                return;
-            };
-            {
-                let mut state = load_state_onload.borrow_mut();
-                adopt_strokes(&mut state, strokes.clone());
-                state.load_reader = None;
-            }
-            send_message(&load_socket_onload, &ClientMessage::Load { strokes });
-        });
-        state.borrow_mut().load_onload = Some(onload);
-
         let load_file_cb = load_file.clone();
         let load_state_onchange = state.clone();
+        let load_socket_onchange = socket.clone();
         let onchange = Closure::<dyn FnMut(Event)>::new(move |_| {
             let files = load_file_cb.files();
             let file = files.and_then(|list| list.get(0));
             let Some(file) = file else {
                 return;
             };
+            {
+                let state = load_state_onchange.borrow();
+                if matches!(state.mode, Mode::Loading(_)) {
+                    return;
+                }
+            }
             let reader = match FileReader::new() {
                 Ok(reader) => reader,
                 Err(_) => return,
             };
-            if let Some(handler) = load_state_onchange.borrow().load_onload.as_ref() {
-                reader.set_onload(Some(handler.as_ref().unchecked_ref()));
+            let load_state_onload = load_state_onchange.clone();
+            let load_socket_onload = load_socket_onchange.clone();
+            let onload = Closure::<dyn FnMut(ProgressEvent)>::new(move |event: ProgressEvent| {
+                let target = match event.target() {
+                    Some(target) => target,
+                    None => {
+                        let mut state = load_state_onload.borrow_mut();
+                        if let Some(previous) = take_loading_previous(&mut state) {
+                            state.mode = previous;
+                        }
+                        return;
+                    }
+                };
+                let reader: FileReader = match target.dyn_into() {
+                    Ok(reader) => reader,
+                    Err(_) => {
+                        let mut state = load_state_onload.borrow_mut();
+                        if let Some(previous) = take_loading_previous(&mut state) {
+                            state.mode = previous;
+                        }
+                        return;
+                    }
+                };
+                let Some(result) = reader.result().ok() else {
+                    let mut state = load_state_onload.borrow_mut();
+                    if let Some(previous) = take_loading_previous(&mut state) {
+                        state.mode = previous;
+                    }
+                    return;
+                };
+                let Some(text) = result.as_string() else {
+                    let mut state = load_state_onload.borrow_mut();
+                    if let Some(previous) = take_loading_previous(&mut state) {
+                        state.mode = previous;
+                    }
+                    return;
+                };
+                let strokes = parse_load_payload(&text);
+                {
+                    let mut state = load_state_onload.borrow_mut();
+                    let Some(previous) = take_loading_previous(&mut state) else {
+                        return;
+                    };
+                    state.mode = previous;
+                    if let Some(strokes) = strokes.as_ref() {
+                        adopt_strokes(&mut state, strokes.clone());
+                    }
+                }
+                if let Some(strokes) = strokes {
+                    send_message(&load_socket_onload, &ClientMessage::Load { strokes });
+                }
+            });
+            reader.set_onload(Some(onload.as_ref().unchecked_ref()));
+            {
+                let mut state = load_state_onchange.borrow_mut();
+                let previous = std::mem::replace(&mut state.mode, Mode::Pan(PanMode::Idle));
+                state.mode = Mode::Loading(LoadingState {
+                    previous: Box::new(previous),
+                    reader: None,
+                    onload: Some(onload),
+                });
             }
             let _ = reader.read_as_text(&file);
-            load_state_onchange.borrow_mut().load_reader.replace(reader);
+            let mut state = load_state_onchange.borrow_mut();
+            if let Mode::Loading(loading) = &mut state.mode {
+                loading.reader = Some(reader);
+            }
         });
         load_file.add_event_listener_with_callback("change", onchange.as_ref().unchecked_ref())?;
         onchange.forget();
@@ -657,13 +736,14 @@ pub fn run() -> Result<(), JsValue> {
                 return;
             }
             event.prevent_default();
-            let (is_select, is_pan, is_erase) = {
+            let (is_select, is_pan, is_erase, is_draw) = {
                 let state = down_state.borrow();
                 match &state.mode {
-                    Mode::Select(_) => (true, false, false),
-                    Mode::Pan(_) => (false, true, false),
-                    Mode::Erase(_) => (false, false, true),
-                    Mode::Draw(_) => (false, false, false),
+                    Mode::Select(_) => (true, false, false, false),
+                    Mode::Pan(_) => (false, true, false, false),
+                    Mode::Erase(_) => (false, false, true, false),
+                    Mode::Draw(_) => (false, false, false, true),
+                    Mode::Loading(_) => (false, false, false, false),
                 }
             };
             if is_select {
@@ -861,6 +941,9 @@ pub fn run() -> Result<(), JsValue> {
                     send_message(&down_socket, &ClientMessage::Erase { id });
                 }
                 let _ = down_canvas.set_pointer_capture(event.pointer_id());
+                return;
+            }
+            if !is_draw {
                 return;
             }
             let id = make_id();

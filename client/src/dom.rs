@@ -41,6 +41,7 @@ pub fn set_canvas_mode(canvas: &HtmlCanvasElement, mode: &Mode, dragging: bool) 
         Mode::Erase(_) => "cell",
         Mode::Draw(_) => "crosshair",
         Mode::Select(_) => "default",
+        Mode::Loading(_) => "progress",
     };
     if let Ok(element) = canvas.clone().dyn_into::<HtmlElement>() {
         let _ = element.style().set_property("cursor", cursor);

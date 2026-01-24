@@ -75,11 +75,18 @@ pub struct SelectState {
     pub mode: SelectMode,
 }
 
+pub struct LoadingState {
+    pub previous: Box<Mode>,
+    pub reader: Option<FileReader>,
+    pub onload: Option<Closure<dyn FnMut(ProgressEvent)>>,
+}
+
 pub enum Mode {
     Draw(DrawState),
     Erase(EraseMode),
     Pan(PanMode),
     Select(SelectState),
+    Loading(LoadingState),
 }
 
 pub struct State {
@@ -87,8 +94,6 @@ pub struct State {
     pub ctx: CanvasRenderingContext2d,
     pub strokes: Vec<Stroke>,
     pub active_ids: HashSet<String>,
-    pub load_reader: Option<FileReader>,
-    pub load_onload: Option<Closure<dyn FnMut(ProgressEvent)>>,
     pub board_width: f64,
     pub board_height: f64,
     pub board_offset_x: f64,
