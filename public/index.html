@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pulseboard</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <canvas id="board" aria-label="Collaborative whiteboard"></canvas>
+
+    <div class="toolbar" role="toolbar" aria-label="Whiteboard tools">
+      <div class="brand">
+        <span class="brand-title">Pulseboard</span>
+        <span class="brand-sub">Live ink, shared fast.</span>
+      </div>
+
+      <div class="control">
+        <label for="color">Ink</label>
+        <input id="color" type="color" value="#1f1f1f" />
+      </div>
+
+      <div class="control range-control">
+        <label for="size">Weight</label>
+        <input id="size" type="range" min="2" max="24" value="8" />
+        <span id="sizeValue" class="range-value">8</span>
+      </div>
+
+      <button id="clear" class="clear" type="button">Clear</button>
+    </div>
+
+    <div class="hud">
+      <div class="status" id="status" data-state="connecting">
+        <span class="dot"></span>
+        <span id="statusText">Connecting...</span>
+      </div>
+      <div class="hint">Share this tab's URL to sketch together.</div>
+    </div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
