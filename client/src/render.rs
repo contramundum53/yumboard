@@ -48,6 +48,8 @@ pub fn draw_segment(
     let to_y = to.y as f64 * scale + board_offset_y + pan_y;
 
     ctx.set_stroke_style_str(color);
+    ctx.set_line_cap("round");
+    ctx.set_line_join("round");
     ctx.set_line_width(weight);
     ctx.begin_path();
     ctx.move_to(from_x, from_y);
