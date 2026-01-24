@@ -6,8 +6,8 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
     CanvasRenderingContext2d, Document, Element, Event, FileReader, HtmlAnchorElement,
-    HtmlButtonElement, HtmlCanvasElement, HtmlElement, HtmlInputElement, HtmlSpanElement,
-    KeyboardEvent, MessageEvent, PointerEvent, ProgressEvent, WebSocket, Window,
+    HtmlButtonElement, HtmlCanvasElement, HtmlElement, HtmlIFrameElement, HtmlInputElement,
+    HtmlSpanElement, KeyboardEvent, MessageEvent, PointerEvent, ProgressEvent, WebSocket, Window,
 };
 
 use pfboard_shared::{ClientMessage, Point, ServerMessage, Stroke};
@@ -104,6 +104,7 @@ pub fn run() -> Result<(), JsValue> {
     let size_value: HtmlSpanElement = get_element(&document, "sizeValue")?;
     let clear_button: HtmlButtonElement = get_element(&document, "clear")?;
     let save_button: HtmlButtonElement = get_element(&document, "save")?;
+    let save_pdf_button: HtmlButtonElement = get_element(&document, "savePdf")?;
     let load_button: HtmlButtonElement = get_element(&document, "load")?;
     let load_file: HtmlInputElement = get_element(&document, "loadFile")?;
     let pen_button: HtmlButtonElement = get_element(&document, "pen")?;
@@ -461,6 +462,17 @@ pub fn run() -> Result<(), JsValue> {
             }
         });
         save_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
+        onclick.forget();
+    }
+
+    {
+        let save_state = state.clone();
+        let document = document.clone();
+        let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
+            let html = build_pdf_html(&save_state.borrow(), false);
+            open_print_window(&document, &html);
+        });
+        save_pdf_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
     }
 
@@ -1540,6 +1552,88 @@ fn point_in_polygon(point: Point, polygon: &[Point]) -> bool {
         j = i;
     }
     inside
+}
+
+fn build_pdf_html(state: &State, include_background: bool) -> String {
+    let mut paths = String::new();
+    for stroke in &state.strokes {
+        if stroke.points.is_empty() {
+            continue;
+        }
+        let mut data = String::new();
+        for (index, point) in stroke.points.iter().enumerate() {
+            let x = point.x as f64 * state.board_scale;
+            let y = point.y as f64 * state.board_scale;
+            if index == 0 {
+                data.push_str(&format!("M {} {}", x, y));
+            } else {
+                data.push_str(&format!(" L {} {}", x, y));
+            }
+        }
+        let color = stroke.color.clone();
+        let width = stroke.size;
+        paths.push_str(&format!(
+            "<path d=\"{}\" stroke=\"{}\" stroke-width=\"{}\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\" />",
+            data, color, width
+        ));
+        if stroke.points.len() == 1 {
+            let p = stroke.points[0];
+            let cx = p.x as f64 * state.board_scale;
+            let cy = p.y as f64 * state.board_scale;
+            let r = stroke.size as f64 / 2.0;
+            paths.push_str(&format!(
+                "<circle cx=\"{}\" cy=\"{}\" r=\"{}\" fill=\"{}\" />",
+                cx, cy, r, color
+            ));
+        }
+    }
+
+    let background = if include_background {
+        "<rect width=\"100%\" height=\"100%\" fill=\"#ffffff\" />"
+    } else {
+        ""
+    };
+
+    format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\" /><style>@page{{margin:0;}}body{{margin:0;}}svg{{width:100vw;height:100vh;}}</style></head><body><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {size} {size}\">{background}{paths}</svg><script>window.onload=()=>{{window.print();}}</script></body></html>",
+        size = state.board_scale,
+        background = background,
+        paths = paths
+    )
+}
+
+fn open_print_window(document: &Document, html: &str) {
+    let blob_parts = js_sys::Array::new();
+    blob_parts.push(&JsValue::from_str(html));
+    let blob = match web_sys::Blob::new_with_str_sequence(&blob_parts) {
+        Ok(blob) => blob,
+        Err(_) => return,
+    };
+    let url = match web_sys::Url::create_object_url_with_blob(&blob) {
+        Ok(url) => url,
+        Err(_) => return,
+    };
+
+    let iframe: HtmlIFrameElement = match document
+        .create_element("iframe")
+        .ok()
+        .and_then(|element| element.dyn_into::<HtmlIFrameElement>().ok())
+    {
+        Some(frame) => frame,
+        None => {
+            let _ = web_sys::Url::revoke_object_url(&url);
+            return;
+        }
+    };
+    let _ = iframe.set_attribute(
+        "style",
+        "position:fixed;right:0;bottom:0;width:0;height:0;border:0;",
+    );
+    iframe.set_src(&url);
+    if let Some(body) = document.body() {
+        let _ = body.append_child(&iframe);
+    }
+    let _ = web_sys::Url::revoke_object_url(&url);
 }
 
 fn start_stroke(state: &mut State, id: String, color: String, size: f32, point: Point) {
