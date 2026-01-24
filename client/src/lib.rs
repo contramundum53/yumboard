@@ -92,7 +92,8 @@ struct State {
     selected_ids: Vec<String>,
     lasso_points: Vec<Point>,
     palette: Vec<String>,
-    palette_selected: usize,
+    palette_selected: Option<usize>,
+    palette_last_selected: usize,
     palette_add_mode: bool,
     selection_mode: SelectionMode,
     transform_center: Point,
@@ -129,7 +130,6 @@ pub fn run() -> Result<(), JsValue> {
     let save_pdf_button: HtmlButtonElement = get_element(&document, "savePdf")?;
     let load_button: HtmlButtonElement = get_element(&document, "load")?;
     let load_file: HtmlInputElement = get_element(&document, "loadFile")?;
-    let pen_button: HtmlButtonElement = get_element(&document, "pen")?;
     let lasso_button: HtmlButtonElement = get_element(&document, "lasso")?;
     let eraser_button: HtmlButtonElement = get_element(&document, "eraser")?;
     let pan_button: HtmlButtonElement = get_element(&document, "pan")?;
@@ -168,7 +168,8 @@ pub fn run() -> Result<(), JsValue> {
         selected_ids: Vec::new(),
         lasso_points: Vec::new(),
         palette: DEFAULT_PALETTE.iter().map(|value| value.to_string()).collect(),
-        palette_selected: 0,
+        palette_selected: Some(0),
+        palette_last_selected: 0,
         palette_add_mode: false,
         selection_mode: SelectionMode::None,
         transform_center: Point { x: 0.0, y: 0.0 },
@@ -181,22 +182,18 @@ pub fn run() -> Result<(), JsValue> {
 
     update_size_label(&size_input, &size_value);
     set_status(&status_el, &status_text, "connecting", "Connecting...");
-    set_tool_button(&pen_button, true);
     set_tool_button(&lasso_button, false);
     set_tool_button(&eraser_button, false);
     set_tool_button(&pan_button, false);
     set_canvas_mode(&canvas, Tool::Draw, false);
     {
         let state = state.borrow_mut();
-        if let Some(color) = state.palette.get(state.palette_selected).cloned() {
-            color_input.set_value(&color);
+        if let Some(index) = state.palette_selected {
+            if let Some(color) = state.palette.get(index).cloned() {
+                color_input.set_value(&color);
+            }
         }
-        render_palette(
-            &document,
-            &palette_el,
-            &state.palette,
-            state.palette_selected,
-        );
+        render_palette(&document, &palette_el, &state.palette, state.palette_selected);
     }
 
     let ws_url = websocket_url(&window)?;
@@ -357,8 +354,9 @@ pub fn run() -> Result<(), JsValue> {
         let tool_state = state.clone();
         let eraser_button_cb = eraser_button.clone();
         let pan_button_cb = pan_button.clone();
-        let pen_button_cb = pen_button.clone();
         let lasso_button_cb = lasso_button.clone();
+        let palette_el_cb = palette_el.clone();
+        let document = document.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = tool_state.borrow_mut();
             state.tool = Tool::Erase;
@@ -370,11 +368,13 @@ pub fn run() -> Result<(), JsValue> {
             state.lasso_points.clear();
             state.selected_ids.clear();
             state.selection_mode = SelectionMode::None;
+            state.palette_selected = None;
+            state.palette_add_mode = false;
             set_tool_button(&pan_button_cb, state.tool == Tool::Pan);
             set_tool_button(&eraser_button_cb, state.tool == Tool::Erase);
-            set_tool_button(&pen_button_cb, state.tool == Tool::Draw);
             set_tool_button(&lasso_button_cb, state.tool == Tool::Select);
             set_canvas_mode(&state.canvas, state.tool, false);
+            render_palette(&document, &palette_el_cb, &state.palette, state.palette_selected);
         });
         eraser_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
@@ -384,35 +384,9 @@ pub fn run() -> Result<(), JsValue> {
         let tool_state = state.clone();
         let eraser_button_cb = eraser_button.clone();
         let pan_button_cb = pan_button.clone();
-        let pen_button_cb = pen_button.clone();
         let lasso_button_cb = lasso_button.clone();
-        let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
-            let mut state = tool_state.borrow_mut();
-            state.tool = Tool::Draw;
-            state.drawing = false;
-            state.current_id = None;
-            state.erasing = false;
-            state.panning = false;
-            state.erase_hits.clear();
-            state.lasso_points.clear();
-            state.selected_ids.clear();
-            state.selection_mode = SelectionMode::None;
-            set_tool_button(&eraser_button_cb, state.tool == Tool::Erase);
-            set_tool_button(&pan_button_cb, state.tool == Tool::Pan);
-            set_tool_button(&pen_button_cb, state.tool == Tool::Draw);
-            set_tool_button(&lasso_button_cb, state.tool == Tool::Select);
-            set_canvas_mode(&state.canvas, state.tool, false);
-        });
-        pen_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
-        onclick.forget();
-    }
-
-    {
-        let tool_state = state.clone();
-        let eraser_button_cb = eraser_button.clone();
-        let pan_button_cb = pan_button.clone();
-        let pen_button_cb = pen_button.clone();
-        let lasso_button_cb = lasso_button.clone();
+        let palette_el_cb = palette_el.clone();
+        let document = document.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = tool_state.borrow_mut();
             state.tool = Tool::Select;
@@ -424,11 +398,13 @@ pub fn run() -> Result<(), JsValue> {
             state.lasso_points.clear();
             state.selected_ids.clear();
             state.selection_mode = SelectionMode::None;
+            state.palette_selected = None;
+            state.palette_add_mode = false;
             set_tool_button(&eraser_button_cb, state.tool == Tool::Erase);
             set_tool_button(&pan_button_cb, state.tool == Tool::Pan);
-            set_tool_button(&pen_button_cb, state.tool == Tool::Draw);
             set_tool_button(&lasso_button_cb, state.tool == Tool::Select);
             set_canvas_mode(&state.canvas, state.tool, false);
+            render_palette(&document, &palette_el_cb, &state.palette, state.palette_selected);
         });
         lasso_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
@@ -438,15 +414,18 @@ pub fn run() -> Result<(), JsValue> {
         let tool_state = state.clone();
         let eraser_button_cb = eraser_button.clone();
         let pan_button_cb = pan_button.clone();
-        let pen_button_cb = pen_button.clone();
         let lasso_button_cb = lasso_button.clone();
+        let palette_el_cb = palette_el.clone();
+        let color_input_cb = color_input.clone();
+        let document = document.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = tool_state.borrow_mut();
-            state.tool = if state.tool == Tool::Pan {
+            let next_tool = if state.tool == Tool::Pan {
                 Tool::Draw
             } else {
                 Tool::Pan
             };
+            state.tool = next_tool;
             state.drawing = false;
             state.current_id = None;
             state.erasing = false;
@@ -455,11 +434,28 @@ pub fn run() -> Result<(), JsValue> {
             state.lasso_points.clear();
             state.selected_ids.clear();
             state.selection_mode = SelectionMode::None;
+            if state.tool == Tool::Draw {
+                state.palette_add_mode = false;
+                if state.palette_last_selected >= state.palette.len() {
+                    state.palette_last_selected = 0;
+                }
+                if state.palette.is_empty() {
+                    state.palette_selected = None;
+                } else {
+                    state.palette_selected = Some(state.palette_last_selected);
+                    if let Some(color) = state.palette.get(state.palette_last_selected).cloned() {
+                        color_input_cb.set_value(&color);
+                    }
+                }
+            } else {
+                state.palette_selected = None;
+                state.palette_add_mode = false;
+            }
             set_tool_button(&eraser_button_cb, state.tool == Tool::Erase);
             set_tool_button(&pan_button_cb, state.tool == Tool::Pan);
-            set_tool_button(&pen_button_cb, state.tool == Tool::Draw);
             set_tool_button(&lasso_button_cb, state.tool == Tool::Select);
             set_canvas_mode(&state.canvas, state.tool, false);
+            render_palette(&document, &palette_el_cb, &state.palette, state.palette_selected);
         });
         pan_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
@@ -470,6 +466,9 @@ pub fn run() -> Result<(), JsValue> {
         let palette_el_cb = palette_el.clone();
         let palette_el_listener = palette_el.clone();
         let color_input = color_input.clone();
+        let eraser_button_cb = eraser_button.clone();
+        let pan_button_cb = pan_button.clone();
+        let lasso_button_cb = lasso_button.clone();
         let document = document.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
             let action = match palette_action_from_event(&event) {
@@ -477,21 +476,38 @@ pub fn run() -> Result<(), JsValue> {
                 None => return,
             };
             let mut state = palette_state.borrow_mut();
+            state.tool = Tool::Draw;
+            state.drawing = false;
+            state.current_id = None;
+            state.erasing = false;
+            state.panning = false;
+            state.erase_hits.clear();
+            state.lasso_points.clear();
+            state.selected_ids.clear();
+            state.selection_mode = SelectionMode::None;
+            set_tool_button(&eraser_button_cb, false);
+            set_tool_button(&pan_button_cb, false);
+            set_tool_button(&lasso_button_cb, false);
+            set_canvas_mode(&state.canvas, Tool::Draw, false);
             match action {
                 PaletteAction::Add => {
                     state.palette_add_mode = true;
+                    render_palette(&document, &palette_el_cb, &state.palette, state.palette_selected);
                     color_input.click();
                 }
                 PaletteAction::Select(index) => {
                     if index >= state.palette.len() {
                         return;
                     }
-                    if index == state.palette_selected {
+                    let already_selected = state.palette_selected == Some(index);
+                    if already_selected && state.tool == Tool::Draw {
                         state.palette_add_mode = false;
                         color_input.click();
                         return;
                     }
-                    state.palette_selected = index;
+                    state.tool = Tool::Draw;
+                    state.palette_selected = Some(index);
+                    state.palette_last_selected = index;
                     state.palette_add_mode = false;
                     if let Some(color) = state.palette.get(index).cloned() {
                         color_input.set_value(&color);
@@ -520,15 +536,24 @@ pub fn run() -> Result<(), JsValue> {
             let mut state = palette_state.borrow_mut();
             if state.palette_add_mode {
                 state.palette.push(color);
-                state.palette_selected = state.palette.len().saturating_sub(1);
+                state.palette_selected = state.palette.len().checked_sub(1);
+                if let Some(index) = state.palette_selected {
+                    state.palette_last_selected = index;
+                }
                 state.palette_add_mode = false;
             } else {
-                if state.palette_selected >= state.palette.len() {
-                    state.palette_selected = 0;
-                }
-                let selected = state.palette_selected;
-                if let Some(entry) = state.palette.get_mut(selected) {
-                    *entry = color;
+                let mut selected = state.palette_selected.unwrap_or(state.palette_last_selected);
+                if state.palette.is_empty() {
+                    state.palette_selected = None;
+                } else {
+                    if selected >= state.palette.len() {
+                        selected = 0;
+                    }
+                    state.palette_selected = Some(selected);
+                    state.palette_last_selected = selected;
+                    if let Some(entry) = state.palette.get_mut(selected) {
+                        *entry = color;
+                    }
                 }
             }
             render_palette(&document, &palette_el_cb, &state.palette, state.palette_selected);
@@ -1331,7 +1356,7 @@ fn render_palette(
     document: &Document,
     palette_el: &HtmlElement,
     colors: &[String],
-    selected: usize,
+    selected: Option<usize>,
 ) {
     palette_el.set_inner_html("");
     for (index, color) in colors.iter().enumerate() {
@@ -1344,7 +1369,7 @@ fn render_palette(
         let _ = button.set_attribute("type", "button");
         let _ = button.set_attribute("data-index", &index.to_string());
         let _ = button.set_attribute("aria-label", &format!("Use color {color}"));
-        let class_name = if index == selected {
+        let class_name = if selected == Some(index) {
             "swatch active"
         } else {
             "swatch"
