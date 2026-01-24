@@ -52,6 +52,7 @@ pub async fn apply_client_message(
 
             session.active_ids.write().await.insert(id.clone());
             session.owners.write().await.insert(id.clone(), sender);
+            session.mark_dirty();
 
             Some((
                 vec![ServerMessage::StrokeStart {
@@ -84,6 +85,7 @@ pub async fn apply_client_message(
             }
 
             if appended {
+                session.mark_dirty();
                 Some((vec![ServerMessage::StrokeMove { id, point }], false))
             } else {
                 None
@@ -116,6 +118,7 @@ pub async fn apply_client_message(
             session.active_ids.write().await.clear();
             session.owners.write().await.clear();
             session.transform_sessions.write().await.clear();
+            session.mark_dirty();
             let mut histories = session.histories.write().await;
             if let Some(history) = histories.get_mut(&sender) {
                 history.undo.push(Action::Clear { strokes: cleared });
@@ -237,6 +240,7 @@ pub async fn apply_client_message(
                     session.strokes.write().await.clear();
                     session.active_ids.write().await.clear();
                     session.owners.write().await.clear();
+                    session.mark_dirty();
                     let mut histories = session.histories.write().await;
                     if let Some(history) = histories.get_mut(&sender) {
                         history.undo.push(Action::Clear { strokes });
@@ -305,6 +309,7 @@ pub async fn apply_client_message(
                     history.undo.push(Action::EraseStroke(stroke));
                     history.redo.clear();
                 }
+                session.mark_dirty();
                 Some((vec![ServerMessage::StrokeRemove { id }], true))
             } else {
                 None
@@ -416,6 +421,7 @@ pub async fn apply_client_message(
             session.active_ids.write().await.clear();
             session.owners.write().await.clear();
             session.transform_sessions.write().await.clear();
+            session.mark_dirty();
             let mut histories = session.histories.write().await;
             for history in histories.values_mut() {
                 history.undo.clear();
@@ -537,6 +543,7 @@ async fn remove_stroke(session: &Session, id: &str) -> bool {
     if removed {
         session.active_ids.write().await.remove(id);
         session.owners.write().await.remove(id);
+        session.mark_dirty();
     }
     removed
 }
@@ -565,6 +572,7 @@ async fn add_stroke(session: &Session, stroke: Stroke, owner: Option<Uuid>) {
     if let Some(owner) = owner {
         session.owners.write().await.insert(stroke.id.clone(), owner);
     }
+    session.mark_dirty();
 }
 
 async fn replace_stroke(session: &Session, stroke: Stroke) -> Option<Stroke> {
@@ -572,6 +580,7 @@ async fn replace_stroke(session: &Session, stroke: Stroke) -> Option<Stroke> {
     if let Some(index) = strokes.iter().position(|s| s.id == stroke.id) {
         let before = strokes[index].clone();
         strokes[index] = stroke;
+        session.mark_dirty();
         Some(before)
     } else {
         None
@@ -590,6 +599,7 @@ async fn remove_stroke_full(session: &Session, id: &str) -> Option<Stroke> {
     if removed.is_some() {
         session.active_ids.write().await.remove(id);
         session.owners.write().await.remove(id);
+        session.mark_dirty();
     }
     removed
 }

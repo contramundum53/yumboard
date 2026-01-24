@@ -110,8 +110,11 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: String) {
     send_task.abort();
 
     if session.peers.read().await.is_empty() {
-        let strokes = session.strokes.read().await.clone();
-        save_session(&state.session_dir, &session_id, &strokes).await;
+        if session.is_dirty() {
+            let strokes = session.strokes.read().await.clone();
+            save_session(&state.session_dir, &session_id, &strokes).await;
+            session.clear_dirty();
+        }
         let mut sessions = state.sessions.write().await;
         if let Some(current) = sessions.get(&session_id) {
             if Arc::ptr_eq(current, &session) {

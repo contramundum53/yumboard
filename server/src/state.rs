@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use pfboard_shared::Stroke;
@@ -22,6 +23,7 @@ pub struct Session {
     pub histories: Arc<RwLock<HashMap<Uuid, ClientHistory>>>,
     pub peers: Arc<RwLock<HashMap<Uuid, mpsc::UnboundedSender<pfboard_shared::ServerMessage>>>>,
     pub transform_sessions: Arc<RwLock<HashMap<Uuid, TransformSession>>>,
+    pub dirty: AtomicBool,
 }
 
 #[derive(Default)]
@@ -52,6 +54,19 @@ impl Session {
             histories: Arc::new(RwLock::new(HashMap::new())),
             peers: Arc::new(RwLock::new(HashMap::new())),
             transform_sessions: Arc::new(RwLock::new(HashMap::new())),
+            dirty: AtomicBool::new(false),
         }
+    }
+
+    pub fn mark_dirty(&self) {
+        self.dirty.store(true, Ordering::Relaxed);
+    }
+
+    pub fn clear_dirty(&self) {
+        self.dirty.store(false, Ordering::Relaxed);
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.dirty.load(Ordering::Relaxed)
     }
 }

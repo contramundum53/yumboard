@@ -53,8 +53,12 @@ async fn main() {
                     .collect::<Vec<_>>()
             };
             for (session_id, session) in sessions {
+                if !session.is_dirty() {
+                    continue;
+                }
                 let strokes = session.strokes.read().await.clone();
                 save_session(&backup_state.session_dir, &session_id, &strokes).await;
+                session.clear_dirty();
             }
         }
     });
