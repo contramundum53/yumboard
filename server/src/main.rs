@@ -21,7 +21,15 @@ const MAX_POINTS_PER_STROKE: usize = 5000;
 struct AppState {
     strokes: Arc<RwLock<Vec<Stroke>>>,
     active_ids: Arc<RwLock<HashSet<String>>>,
+    owners: Arc<RwLock<HashMap<String, Uuid>>>,
+    histories: Arc<RwLock<HashMap<Uuid, ClientHistory>>>,
     peers: Arc<RwLock<HashMap<Uuid, mpsc::UnboundedSender<ServerMessage>>>>,
+}
+
+#[derive(Default)]
+struct ClientHistory {
+    undo: Vec<Stroke>,
+    redo: Vec<Stroke>,
 }
 
 #[tokio::main]
@@ -29,6 +37,8 @@ async fn main() {
     let state = AppState {
         strokes: Arc::new(RwLock::new(Vec::new())),
         active_ids: Arc::new(RwLock::new(HashSet::new())),
+        owners: Arc::new(RwLock::new(HashMap::new())),
+        histories: Arc::new(RwLock::new(HashMap::new())),
         peers: Arc::new(RwLock::new(HashMap::new())),
     };
 
@@ -64,6 +74,11 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     let connection_id = Uuid::new_v4();
 
     state.peers.write().await.insert(connection_id, tx);
+    state
+        .histories
+        .write()
+        .await
+        .insert(connection_id, ClientHistory::default());
 
     let strokes_snapshot = state.strokes.read().await.clone();
     if let Ok(sync_payload) = serde_json::to_string(&ServerMessage::Sync {
@@ -87,10 +102,14 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
             Message::Text(text) => {
                 let parsed = serde_json::from_str::<ClientMessage>(&text);
                 if let Ok(client_message) = parsed {
-                    if let Some(server_message) =
-                        apply_client_message(&state, client_message).await
+                    if let Some((server_message, include_sender)) =
+                        apply_client_message(&state, connection_id, client_message).await
                     {
-                        broadcast(&state, connection_id, server_message).await;
+                        if include_sender {
+                            broadcast_all(&state, server_message).await;
+                        } else {
+                            broadcast_except(&state, connection_id, server_message).await;
+                        }
                     }
                 }
             }
@@ -100,13 +119,15 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     }
 
     state.peers.write().await.remove(&connection_id);
+    state.histories.write().await.remove(&connection_id);
     send_task.abort();
 }
 
 async fn apply_client_message(
     state: &AppState,
+    sender: Uuid,
     message: ClientMessage,
-) -> Option<ServerMessage> {
+) -> Option<(ServerMessage, bool)> {
     match message {
         ClientMessage::StrokeStart {
             id,
@@ -140,19 +161,25 @@ async fn apply_client_message(
 
             if !removed.is_empty() {
                 let mut active = state.active_ids.write().await;
+                let mut owners = state.owners.write().await;
                 for stroke in removed {
                     active.remove(&stroke.id);
+                    owners.remove(&stroke.id);
                 }
             }
 
             state.active_ids.write().await.insert(id.clone());
+            state.owners.write().await.insert(id.clone(), sender);
 
-            Some(ServerMessage::StrokeStart {
-                id,
-                color,
-                size,
-                point,
-            })
+            Some((
+                ServerMessage::StrokeStart {
+                    id,
+                    color,
+                    size,
+                    point,
+                },
+                false,
+            ))
         }
         ClientMessage::StrokeMove { id, point } => {
             if id.is_empty() || id.len() > 64 {
@@ -175,7 +202,7 @@ async fn apply_client_message(
             }
 
             if appended {
-                Some(ServerMessage::StrokeMove { id, point })
+                Some((ServerMessage::StrokeMove { id, point }, false))
             } else {
                 None
             }
@@ -185,17 +212,84 @@ async fn apply_client_message(
                 return None;
             }
             state.active_ids.write().await.remove(&id);
-            Some(ServerMessage::StrokeEnd { id })
+            if let Some(owner) = state.owners.read().await.get(&id) {
+                if *owner == sender {
+                    let stroke = {
+                        let strokes = state.strokes.read().await;
+                        strokes.iter().find(|stroke| stroke.id == id).cloned()
+                    };
+                    if let Some(stroke) = stroke {
+                        let mut histories = state.histories.write().await;
+                        if let Some(history) = histories.get_mut(&sender) {
+                            history.undo.push(stroke);
+                            history.redo.clear();
+                        }
+                    }
+                }
+            }
+            Some((ServerMessage::StrokeEnd { id }, false))
         }
         ClientMessage::Clear => {
             state.strokes.write().await.clear();
             state.active_ids.write().await.clear();
-            Some(ServerMessage::Clear)
+            state.owners.write().await.clear();
+            let mut histories = state.histories.write().await;
+            for history in histories.values_mut() {
+                history.undo.clear();
+                history.redo.clear();
+            }
+            Some((ServerMessage::Clear, false))
+        }
+        ClientMessage::Undo => {
+            let stroke = {
+                let mut histories = state.histories.write().await;
+                histories.get_mut(&sender).and_then(|history| history.undo.pop())
+            }?;
+            let stroke_id = stroke.id.clone();
+
+            let removed = {
+                let mut strokes = state.strokes.write().await;
+                if let Some(index) = strokes.iter().position(|s| s.id == stroke_id) {
+                    strokes.remove(index);
+                    true
+                } else {
+                    false
+                }
+            };
+
+            if removed {
+                state.active_ids.write().await.remove(&stroke_id);
+                let mut histories = state.histories.write().await;
+                if let Some(history) = histories.get_mut(&sender) {
+                    history.redo.push(stroke);
+                }
+                Some((ServerMessage::StrokeRemove { id: stroke_id }, true))
+            } else {
+                None
+            }
+        }
+        ClientMessage::Redo => {
+            let stroke = {
+                let mut histories = state.histories.write().await;
+                histories.get_mut(&sender).and_then(|history| history.redo.pop())
+            }?;
+
+            {
+                let mut strokes = state.strokes.write().await;
+                strokes.push(stroke.clone());
+            }
+
+            let mut histories = state.histories.write().await;
+            if let Some(history) = histories.get_mut(&sender) {
+                history.undo.push(stroke.clone());
+            }
+
+            Some((ServerMessage::StrokeRestore { stroke }, true))
         }
     }
 }
 
-async fn broadcast(state: &AppState, sender: Uuid, message: ServerMessage) {
+async fn broadcast_except(state: &AppState, sender: Uuid, message: ServerMessage) {
     let mut stale = Vec::new();
     {
         let peers = state.peers.read().await;
@@ -203,6 +297,25 @@ async fn broadcast(state: &AppState, sender: Uuid, message: ServerMessage) {
             if *id == sender {
                 continue;
             }
+            if tx.send(message.clone()).is_err() {
+                stale.push(*id);
+            }
+        }
+    }
+
+    if !stale.is_empty() {
+        let mut peers = state.peers.write().await;
+        for id in stale {
+            peers.remove(&id);
+        }
+    }
+}
+
+async fn broadcast_all(state: &AppState, message: ServerMessage) {
+    let mut stale = Vec::new();
+    {
+        let peers = state.peers.read().await;
+        for (id, tx) in peers.iter() {
             if tx.send(message.clone()).is_err() {
                 stale.push(*id);
             }

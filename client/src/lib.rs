@@ -6,7 +6,8 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
     CanvasRenderingContext2d, Document, Element, Event, HtmlButtonElement, HtmlCanvasElement,
-    HtmlInputElement, HtmlSpanElement, MessageEvent, PointerEvent, WebSocket, Window,
+    HtmlInputElement, HtmlSpanElement, KeyboardEvent, MessageEvent, PointerEvent, WebSocket,
+    Window,
 };
 
 use pfboard_shared::{ClientMessage, Point, ServerMessage, Stroke};
@@ -131,6 +132,12 @@ pub fn run() -> Result<(), JsValue> {
                 ServerMessage::Clear => {
                     clear_board(&mut state);
                 }
+                ServerMessage::StrokeRemove { id } => {
+                    remove_stroke(&mut state, &id);
+                }
+                ServerMessage::StrokeRestore { stroke } => {
+                    restore_stroke(&mut state, stroke);
+                }
             }
         });
         socket.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
@@ -146,6 +153,33 @@ pub fn run() -> Result<(), JsValue> {
         });
         window.add_event_listener_with_callback("resize", onresize.as_ref().unchecked_ref())?;
         onresize.forget();
+    }
+
+    {
+        let key_socket = socket.clone();
+        let onkeydown = Closure::<dyn FnMut(KeyboardEvent)>::new(move |event: KeyboardEvent| {
+            let key = event.key();
+            let modifier = event.meta_key() || event.ctrl_key();
+            if !modifier {
+                return;
+            }
+            if event.shift_key() && key.eq_ignore_ascii_case("z") {
+                event.prevent_default();
+                send_message(&key_socket, &ClientMessage::Redo);
+                return;
+            }
+            if key.eq_ignore_ascii_case("z") {
+                event.prevent_default();
+                send_message(&key_socket, &ClientMessage::Undo);
+                return;
+            }
+            if key.eq_ignore_ascii_case("y") {
+                event.prevent_default();
+                send_message(&key_socket, &ClientMessage::Redo);
+            }
+        });
+        window.add_event_listener_with_callback("keydown", onkeydown.as_ref().unchecked_ref())?;
+        onkeydown.forget();
     }
 
     {
@@ -519,6 +553,24 @@ fn end_stroke(state: &mut State, id: &str) {
 fn clear_board(state: &mut State) {
     state.strokes.clear();
     state.active_ids.clear();
+    redraw(state);
+}
+
+fn remove_stroke(state: &mut State, id: &str) {
+    if let Some(index) = state.strokes.iter().position(|stroke| stroke.id == id) {
+        state.strokes.remove(index);
+        state.active_ids.remove(id);
+        redraw(state);
+    }
+}
+
+fn restore_stroke(state: &mut State, mut stroke: Stroke) {
+    stroke.points = stroke
+        .points
+        .into_iter()
+        .filter_map(normalize_point)
+        .collect();
+    state.strokes.push(stroke);
     redraw(state);
 }
 

@@ -43,6 +43,10 @@ pub enum ClientMessage {
     StrokeEnd { id: String },
     #[serde(rename = "clear")]
     Clear,
+    #[serde(rename = "undo")]
+    Undo,
+    #[serde(rename = "redo")]
+    Redo,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -63,4 +67,8 @@ pub enum ServerMessage {
     StrokeEnd { id: String },
     #[serde(rename = "clear")]
     Clear,
+    #[serde(rename = "stroke:remove")]
+    StrokeRemove { id: String },
+    #[serde(rename = "stroke:restore")]
+    StrokeRestore { stroke: Stroke },
 }

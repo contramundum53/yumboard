@@ -28,6 +28,7 @@ features = [
   "HtmlCanvasElement",
   "HtmlInputElement",
   "HtmlSpanElement",
+  "KeyboardEvent",
   "Location",
   "MessageEvent",
   "PointerEvent",
