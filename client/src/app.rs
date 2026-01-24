@@ -10,7 +10,7 @@ use web_sys::{
     PointerEvent, ProgressEvent, WebSocket,
 };
 
-use pfboard_shared::{ClientMessage, ServerMessage};
+use pfboard_shared::{ClientMessage, ServerMessage, Stroke};
 
 use crate::actions::{
     adopt_strokes, apply_transformed_strokes, clear_board, end_stroke, erase_hits_at_point,
@@ -82,6 +82,12 @@ fn take_loading_previous(state: &mut State) -> Option<Mode> {
 fn set_load_busy(load_button: &HtmlButtonElement, busy: bool) {
     let value = if busy { "true" } else { "false" };
     let _ = load_button.set_attribute("aria-busy", value);
+}
+
+fn read_load_payload(event: &ProgressEvent) -> Option<Vec<Stroke>> {
+    let reader: FileReader = event.target()?.dyn_into().ok()?;
+    let text = reader.result().ok()?.as_string()?;
+    parse_load_payload(&text)
 }
 
 #[wasm_bindgen(start)]
@@ -659,26 +665,7 @@ pub fn run() -> Result<(), JsValue> {
             let load_socket_onload = load_socket_onchange.clone();
             let load_button_onload = load_button_cb.clone();
             let onload = Closure::<dyn FnMut(ProgressEvent)>::new(move |event: ProgressEvent| {
-                let restore = || {
-                    let mut state = load_state_onload.borrow_mut();
-                    if let Some(previous) = take_loading_previous(&mut state) {
-                        state.mode = previous;
-                    }
-                    set_load_busy(&load_button_onload, false);
-                };
-                let reader = event
-                    .target()
-                    .and_then(|target| target.dyn_into::<FileReader>().ok());
-                let Some(reader) = reader else {
-                    restore();
-                    return;
-                };
-                let text = reader.result().ok().and_then(|result| result.as_string());
-                let Some(text) = text else {
-                    restore();
-                    return;
-                };
-                let strokes = parse_load_payload(&text);
+                let strokes = read_load_payload(&event);
                 {
                     let mut state = load_state_onload.borrow_mut();
                     let Some(previous) = take_loading_previous(&mut state) else {
