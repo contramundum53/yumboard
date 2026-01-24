@@ -51,6 +51,10 @@ pub enum ClientMessage {
     Erase { id: String },
     #[serde(rename = "stroke:replace")]
     StrokeReplace { stroke: Stroke },
+    #[serde(rename = "transform:start")]
+    TransformStart { ids: Vec<String> },
+    #[serde(rename = "transform:end")]
+    TransformEnd { ids: Vec<String> },
     #[serde(rename = "remove")]
     Remove { ids: Vec<String> },
     #[serde(rename = "load")]

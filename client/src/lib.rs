@@ -671,6 +671,13 @@ pub fn run() -> Result<(), JsValue> {
                                 state.transform_start_angle =
                                     angle_between(center, world_point);
                                 state.transform_snapshot = selected_strokes(&state);
+                                let ids = state.selected_ids.clone();
+                                if !ids.is_empty() {
+                                    send_message(
+                                        &down_socket,
+                                        &ClientMessage::TransformStart { ids },
+                                    );
+                                }
                             }
                         }
                         SelectionHit::Scale(handle) => {
@@ -682,12 +689,23 @@ pub fn run() -> Result<(), JsValue> {
                                 state.transform_start = world_point;
                                 state.transform_scale_axis = handle.axis;
                                 state.transform_snapshot = selected_strokes(&state);
+                                let ids = state.selected_ids.clone();
+                                if !ids.is_empty() {
+                                    send_message(
+                                        &down_socket,
+                                        &ClientMessage::TransformStart { ids },
+                                    );
+                                }
                             }
                         }
                         SelectionHit::Move => {
                             state.selection_mode = SelectionMode::Move;
                             state.transform_start = world_point;
                             state.transform_snapshot = selected_strokes(&state);
+                            let ids = state.selected_ids.clone();
+                            if !ids.is_empty() {
+                                send_message(&down_socket, &ClientMessage::TransformStart { ids });
+                            }
                         }
                     }
                     let _ = down_canvas.set_pointer_capture(event.pointer_id());
@@ -1015,6 +1033,12 @@ pub fn run() -> Result<(), JsValue> {
                     let _ = stop_canvas.release_pointer_capture(event.pointer_id());
                 }
                 let mut state = stop_state.borrow_mut();
+                let end_ids = match state.selection_mode {
+                    SelectionMode::Move | SelectionMode::Scale | SelectionMode::Rotate => {
+                        Some(state.selected_ids.clone())
+                    }
+                    _ => None,
+                };
                 match state.selection_mode {
                     SelectionMode::Lasso => {
                         finalize_lasso_selection(&mut state);
@@ -1028,6 +1052,12 @@ pub fn run() -> Result<(), JsValue> {
                 state.transform_snapshot.clear();
                 state.lasso_points.clear();
                 redraw(&mut state);
+                drop(state);
+                if let Some(ids) = end_ids {
+                    if !ids.is_empty() {
+                        send_message(&stop_socket, &ClientMessage::TransformEnd { ids });
+                    }
+                }
                 return;
             }
             let mode = {

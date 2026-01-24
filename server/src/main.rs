@@ -30,6 +30,7 @@ struct Session {
     owners: Arc<RwLock<HashMap<String, Uuid>>>,
     histories: Arc<RwLock<HashMap<Uuid, ClientHistory>>>,
     peers: Arc<RwLock<HashMap<Uuid, mpsc::UnboundedSender<ServerMessage>>>>,
+    transform_sessions: Arc<RwLock<HashMap<Uuid, TransformSession>>>,
 }
 
 #[derive(Default)]
@@ -43,6 +44,12 @@ enum Action {
     EraseStroke(Stroke),
     Clear { strokes: Vec<Stroke> },
     ReplaceStroke { before: Stroke, after: Stroke },
+    Transform { before: Vec<Stroke>, after: Vec<Stroke> },
+}
+
+struct TransformSession {
+    ids: Vec<String>,
+    before: Vec<Stroke>,
 }
 
 #[tokio::main]
@@ -175,6 +182,11 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: String) {
 
     session.peers.write().await.remove(&connection_id);
     session.histories.write().await.remove(&connection_id);
+    session
+        .transform_sessions
+        .write()
+        .await
+        .remove(&connection_id);
     send_task.abort();
 
     if session.peers.read().await.is_empty() {
@@ -299,6 +311,7 @@ async fn apply_client_message(
             let cleared = session.strokes.write().await.drain(..).collect::<Vec<_>>();
             session.active_ids.write().await.clear();
             session.owners.write().await.clear();
+            session.transform_sessions.write().await.clear();
             let mut histories = session.histories.write().await;
             if let Some(history) = histories.get_mut(&sender) {
                 history.undo.push(Action::Clear { strokes: cleared });
@@ -364,6 +377,29 @@ async fn apply_client_message(
                         None
                     }
                 }
+                Action::Transform { before, after } => {
+                    let mut replaced = Vec::new();
+                    for stroke in &before {
+                        if replace_stroke(session, stroke.clone()).await.is_some() {
+                            replaced.push(stroke.clone());
+                        }
+                    }
+                    if replaced.is_empty() {
+                        return None;
+                    }
+                    let mut histories = session.histories.write().await;
+                    if let Some(history) = histories.get_mut(&sender) {
+                        history.redo.push(Action::Transform {
+                            before: before.clone(),
+                            after,
+                        });
+                    }
+                    let messages = replaced
+                        .into_iter()
+                        .map(|stroke| ServerMessage::StrokeReplace { stroke })
+                        .collect::<Vec<_>>();
+                    Some((messages, true))
+                }
             }
         }
         ClientMessage::Redo => {
@@ -418,6 +454,29 @@ async fn apply_client_message(
                         None
                     }
                 }
+                Action::Transform { before, after } => {
+                    let mut replaced = Vec::new();
+                    for stroke in &after {
+                        if replace_stroke(session, stroke.clone()).await.is_some() {
+                            replaced.push(stroke.clone());
+                        }
+                    }
+                    if replaced.is_empty() {
+                        return None;
+                    }
+                    let mut histories = session.histories.write().await;
+                    if let Some(history) = histories.get_mut(&sender) {
+                        history.undo.push(Action::Transform {
+                            before,
+                            after: after.clone(),
+                        });
+                    }
+                    let messages = replaced
+                        .into_iter()
+                        .map(|stroke| ServerMessage::StrokeReplace { stroke })
+                        .collect::<Vec<_>>();
+                    Some((messages, true))
+                }
             }
         }
         ClientMessage::Erase { id } => {
@@ -450,14 +509,69 @@ async fn apply_client_message(
         ClientMessage::StrokeReplace { stroke } => {
             let stroke = sanitize_stroke(stroke)?;
             let before = replace_stroke(session, stroke.clone()).await?;
-            let mut histories = session.histories.write().await;
-            if let Some(history) = histories.get_mut(&sender) {
-                history
-                    .undo
-                    .push(Action::ReplaceStroke { before, after: stroke.clone() });
-                history.redo.clear();
+            let in_transform = session
+                .transform_sessions
+                .read()
+                .await
+                .contains_key(&sender);
+            if !in_transform {
+                let mut histories = session.histories.write().await;
+                if let Some(history) = histories.get_mut(&sender) {
+                    history
+                        .undo
+                        .push(Action::ReplaceStroke { before, after: stroke.clone() });
+                    history.redo.clear();
+                }
             }
             Some((vec![ServerMessage::StrokeReplace { stroke }], false))
+        }
+        ClientMessage::TransformStart { ids } => {
+            let ids = sanitize_ids(ids);
+            if ids.is_empty() {
+                return None;
+            }
+            let before = {
+                let strokes = session.strokes.read().await;
+                strokes
+                    .iter()
+                    .filter(|stroke| ids.iter().any(|id| id == &stroke.id))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            };
+            session.transform_sessions.write().await.insert(
+                sender,
+                TransformSession {
+                    ids,
+                    before,
+                },
+            );
+            None
+        }
+        ClientMessage::TransformEnd { ids: _ } => {
+            let session_info = session.transform_sessions.write().await.remove(&sender);
+            let Some(session_info) = session_info else {
+                return None;
+            };
+            let after = {
+                let strokes = session.strokes.read().await;
+                strokes
+                    .iter()
+                    .filter(|stroke| session_info.ids.iter().any(|id| id == &stroke.id))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            };
+            if session_info.before.is_empty() || after.is_empty() {
+                return None;
+            }
+            let mut histories = session.histories.write().await;
+            if let Some(history) = histories.get_mut(&sender) {
+                history.undo.push(Action::Transform {
+                    before: session_info.before,
+                    after,
+                });
+                history.redo.clear();
+            }
+            None
         }
         ClientMessage::Remove { ids } => {
             if ids.is_empty() {
@@ -497,6 +611,7 @@ async fn apply_client_message(
             }
             session.active_ids.write().await.clear();
             session.owners.write().await.clear();
+            session.transform_sessions.write().await.clear();
             let mut histories = session.histories.write().await;
             for history in histories.values_mut() {
                 history.undo.clear();
@@ -637,6 +752,20 @@ fn sanitize_strokes(strokes: Vec<Stroke>) -> Vec<Stroke> {
         .collect()
 }
 
+fn sanitize_ids(ids: Vec<String>) -> Vec<String> {
+    let mut unique = HashSet::new();
+    let mut result = Vec::new();
+    for id in ids {
+        if id.is_empty() || id.len() > 64 {
+            continue;
+        }
+        if unique.insert(id.clone()) {
+            result.push(id);
+        }
+    }
+    result
+}
+
 async fn replace_stroke(session: &Session, stroke: Stroke) -> Option<Stroke> {
     let mut strokes = session.strokes.write().await;
     if let Some(index) = strokes.iter().position(|s| s.id == stroke.id) {
@@ -672,6 +801,7 @@ impl Session {
             owners: Arc::new(RwLock::new(HashMap::new())),
             histories: Arc::new(RwLock::new(HashMap::new())),
             peers: Arc::new(RwLock::new(HashMap::new())),
+            transform_sessions: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 }
