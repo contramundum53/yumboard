@@ -36,6 +36,7 @@ enum Action {
     AddStroke(Stroke),
     EraseStroke(Stroke),
     Clear { strokes: Vec<Stroke> },
+    ReplaceStroke { before: Stroke, after: Stroke },
 }
 
 #[tokio::main]
@@ -291,6 +292,21 @@ async fn apply_client_message(
                         .collect::<Vec<_>>();
                     Some((messages, true))
                 }
+                Action::ReplaceStroke { before, after } => {
+                    let replaced = replace_stroke(state, before.clone()).await;
+                    if replaced.is_some() {
+                        let mut histories = state.histories.write().await;
+                        if let Some(history) = histories.get_mut(&sender) {
+                            history.redo.push(Action::ReplaceStroke {
+                                before: before.clone(),
+                                after,
+                            });
+                        }
+                        Some((vec![ServerMessage::StrokeReplace { stroke: before }], true))
+                    } else {
+                        None
+                    }
+                }
             }
         }
         ClientMessage::Redo => {
@@ -330,6 +346,21 @@ async fn apply_client_message(
                     }
                     Some((vec![ServerMessage::Clear], true))
                 }
+                Action::ReplaceStroke { before, after } => {
+                    let replaced = replace_stroke(state, after.clone()).await;
+                    if replaced.is_some() {
+                        let mut histories = state.histories.write().await;
+                        if let Some(history) = histories.get_mut(&sender) {
+                            history.undo.push(Action::ReplaceStroke {
+                                before,
+                                after: after.clone(),
+                            });
+                        }
+                        Some((vec![ServerMessage::StrokeReplace { stroke: after }], true))
+                    } else {
+                        None
+                    }
+                }
             }
         }
         ClientMessage::Erase { id } => {
@@ -358,6 +389,48 @@ async fn apply_client_message(
             } else {
                 None
             }
+        }
+        ClientMessage::StrokeReplace { stroke } => {
+            let stroke = sanitize_stroke(stroke)?;
+            let before = replace_stroke(state, stroke.clone()).await?;
+            let mut histories = state.histories.write().await;
+            if let Some(history) = histories.get_mut(&sender) {
+                history
+                    .undo
+                    .push(Action::ReplaceStroke { before, after: stroke.clone() });
+                history.redo.clear();
+            }
+            Some((vec![ServerMessage::StrokeReplace { stroke }], false))
+        }
+        ClientMessage::Remove { ids } => {
+            if ids.is_empty() {
+                return None;
+            }
+            let mut removed = Vec::new();
+            for id in ids {
+                if id.is_empty() || id.len() > 64 {
+                    continue;
+                }
+                let stroke = remove_stroke_full(state, &id).await;
+                if let Some(stroke) = stroke {
+                    removed.push(stroke);
+                }
+            }
+            if removed.is_empty() {
+                return None;
+            }
+            let mut histories = state.histories.write().await;
+            if let Some(history) = histories.get_mut(&sender) {
+                for stroke in &removed {
+                    history.undo.push(Action::EraseStroke(stroke.clone()));
+                }
+                history.redo.clear();
+            }
+            let messages = removed
+                .into_iter()
+                .map(|stroke| ServerMessage::StrokeRemove { id: stroke.id })
+                .collect::<Vec<_>>();
+            Some((messages, false))
         }
     }
 }
@@ -466,4 +539,48 @@ fn sanitize_color(mut color: String) -> String {
 fn sanitize_size(size: f32) -> f32 {
     let size = if size.is_finite() { size } else { 6.0 };
     size.max(1.0).min(60.0)
+}
+
+fn sanitize_stroke(mut stroke: Stroke) -> Option<Stroke> {
+    if stroke.id.is_empty() || stroke.id.len() > 64 {
+        return None;
+    }
+    stroke.color = sanitize_color(stroke.color);
+    stroke.size = sanitize_size(stroke.size);
+    stroke.points = stroke
+        .points
+        .into_iter()
+        .filter_map(normalize_point)
+        .collect();
+    if stroke.points.is_empty() {
+        return None;
+    }
+    Some(stroke)
+}
+
+async fn replace_stroke(state: &AppState, stroke: Stroke) -> Option<Stroke> {
+    let mut strokes = state.strokes.write().await;
+    if let Some(index) = strokes.iter().position(|s| s.id == stroke.id) {
+        let before = strokes[index].clone();
+        strokes[index] = stroke;
+        Some(before)
+    } else {
+        None
+    }
+}
+
+async fn remove_stroke_full(state: &AppState, id: &str) -> Option<Stroke> {
+    let removed = {
+        let mut strokes = state.strokes.write().await;
+        if let Some(index) = strokes.iter().position(|s| s.id == id) {
+            Some(strokes.remove(index))
+        } else {
+            None
+        }
+    };
+    if removed.is_some() {
+        state.active_ids.write().await.remove(id);
+        state.owners.write().await.remove(id);
+    }
+    removed
 }

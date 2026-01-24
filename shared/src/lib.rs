@@ -49,6 +49,10 @@ pub enum ClientMessage {
     Redo,
     #[serde(rename = "erase")]
     Erase { id: String },
+    #[serde(rename = "stroke:replace")]
+    StrokeReplace { stroke: Stroke },
+    #[serde(rename = "remove")]
+    Remove { ids: Vec<String> },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -73,4 +77,6 @@ pub enum ServerMessage {
     StrokeRemove { id: String },
     #[serde(rename = "stroke:restore")]
     StrokeRestore { stroke: Stroke },
+    #[serde(rename = "stroke:replace")]
+    StrokeReplace { stroke: Stroke },
 }
