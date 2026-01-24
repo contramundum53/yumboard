@@ -55,8 +55,13 @@ pub enum PanMode {
 
 pub enum SelectMode {
     Idle,
-    Lasso { points: Vec<Point> },
-    Move { start: Point, snapshot: Vec<Stroke> },
+    Lasso {
+        points: Vec<Point>,
+    },
+    Move {
+        start: Point,
+        snapshot: Vec<Stroke>,
+    },
     Scale {
         anchor: Point,
         start: Point,
@@ -96,8 +101,6 @@ pub struct State {
     pub active_ids: HashSet<String>,
     pub board_width: f64,
     pub board_height: f64,
-    pub board_offset_x: f64,
-    pub board_offset_y: f64,
     pub zoom: f64,
     pub pan_x: f64,
     pub pan_y: f64,
@@ -105,5 +108,4 @@ pub struct State {
     pub mode: Mode,
 }
 
-impl State {
-}
+impl State {}

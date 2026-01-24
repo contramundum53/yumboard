@@ -135,8 +135,6 @@ pub fn run() -> Result<(), JsValue> {
         active_ids: HashSet::new(),
         board_width: 0.0,
         board_height: 0.0,
-        board_offset_x: 0.0,
-        board_offset_y: 0.0,
         zoom: 1.0,
         pan_x: 0.0,
         pan_y: 0.0,
@@ -725,21 +723,17 @@ pub fn run() -> Result<(), JsValue> {
             let rect = down_canvas.get_bounding_client_rect();
             let screen_x = event.client_x() as f64 - rect.left();
             let screen_y = event.client_y() as f64 - rect.top();
-            let (pan_x, pan_y, zoom, offset_x, offset_y, select_info) = {
+            let (pan_x, pan_y, zoom, select_info) = {
                 let state = down_state.borrow();
                 let pan_x = state.pan_x;
                 let pan_y = state.pan_y;
                 let zoom = state.zoom;
-                let offset_x = state.board_offset_x;
-                let offset_y = state.board_offset_y;
                 let select_info = match &state.mode {
                     Mode::Select(select) => Some((
                         selection_hit_test(
                             &state.strokes,
                             select,
                             zoom,
-                            offset_x,
-                            offset_y,
                             pan_x,
                             pan_y,
                             screen_x,
@@ -751,7 +745,7 @@ pub fn run() -> Result<(), JsValue> {
                     )),
                     _ => None,
                 };
-                (pan_x, pan_y, zoom, offset_x, offset_y, select_info)
+                (pan_x, pan_y, zoom, select_info)
             };
             let mut state = down_state.borrow_mut();
             let mode = std::mem::replace(&mut state.mode, Mode::Pan(PanMode::Idle));
@@ -760,15 +754,8 @@ pub fn run() -> Result<(), JsValue> {
                     state.mode = Mode::Loading(loading);
                 }
                 Mode::Select(mut select) => {
-                    let world_point = match event_to_point(
-                        &down_canvas,
-                        &event,
-                        pan_x,
-                        pan_y,
-                        zoom,
-                        offset_x,
-                        offset_y,
-                    ) {
+                    let world_point = match event_to_point(&down_canvas, &event, pan_x, pan_y, zoom)
+                    {
                         Some(point) => point,
                         None => {
                             state.mode = Mode::Select(select);
@@ -866,15 +853,7 @@ pub fn run() -> Result<(), JsValue> {
                     let _ = down_canvas.set_pointer_capture(event.pointer_id());
                 }
                 Mode::Erase(_) => {
-                    let point = match event_to_point(
-                        &down_canvas,
-                        &event,
-                        pan_x,
-                        pan_y,
-                        zoom,
-                        offset_x,
-                        offset_y,
-                    ) {
+                    let point = match event_to_point(&down_canvas, &event, pan_x, pan_y, zoom) {
                         Some(point) => point,
                         None => {
                             state.mode = Mode::Erase(EraseMode::Idle);
@@ -891,15 +870,7 @@ pub fn run() -> Result<(), JsValue> {
                     let _ = down_canvas.set_pointer_capture(event.pointer_id());
                 }
                 Mode::Draw(mut draw) => {
-                    let point = match event_to_point(
-                        &down_canvas,
-                        &event,
-                        pan_x,
-                        pan_y,
-                        zoom,
-                        offset_x,
-                        offset_y,
-                    ) {
+                    let point = match event_to_point(&down_canvas, &event, pan_x, pan_y, zoom) {
                         Some(point) => point,
                         None => {
                             state.mode = Mode::Draw(draw);
@@ -936,15 +907,9 @@ pub fn run() -> Result<(), JsValue> {
         let move_socket = socket.clone();
         let move_canvas = canvas.clone();
         let onmove = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
-            let (pan_x, pan_y, zoom, offset_x, offset_y) = {
+            let (pan_x, pan_y, zoom) = {
                 let state = move_state.borrow();
-                (
-                    state.pan_x,
-                    state.pan_y,
-                    state.zoom,
-                    state.board_offset_x,
-                    state.board_offset_y,
-                )
+                (state.pan_x, state.pan_y, state.zoom)
             };
             let rect = move_canvas.get_bounding_client_rect();
             let screen_x = event.client_x() as f64 - rect.left();
@@ -956,8 +921,6 @@ pub fn run() -> Result<(), JsValue> {
                         &state.strokes,
                         select,
                         state.zoom,
-                        state.board_offset_x,
-                        state.board_offset_y,
                         state.pan_x,
                         state.pan_y,
                         screen_x,
@@ -969,15 +932,8 @@ pub fn run() -> Result<(), JsValue> {
             let mut state = move_state.borrow_mut();
             match &mut state.mode {
                 Mode::Select(select) => {
-                    let world_point = match event_to_point(
-                        &move_canvas,
-                        &event,
-                        pan_x,
-                        pan_y,
-                        zoom,
-                        offset_x,
-                        offset_y,
-                    ) {
+                    let world_point = match event_to_point(&move_canvas, &event, pan_x, pan_y, zoom)
+                    {
                         Some(point) => point,
                         None => return,
                     };
@@ -1058,15 +1014,7 @@ pub fn run() -> Result<(), JsValue> {
                     }
                 }
                 Mode::Erase(EraseMode::Active { .. }) => {
-                    let point = match event_to_point(
-                        &move_canvas,
-                        &event,
-                        pan_x,
-                        pan_y,
-                        zoom,
-                        offset_x,
-                        offset_y,
-                    ) {
+                    let point = match event_to_point(&move_canvas, &event, pan_x, pan_y, zoom) {
                         Some(point) => point,
                         None => return,
                     };
@@ -1092,15 +1040,7 @@ pub fn run() -> Result<(), JsValue> {
                         DrawMode::Drawing { id } => id.clone(),
                         _ => return,
                     };
-                    let point = match event_to_point(
-                        &move_canvas,
-                        &event,
-                        pan_x,
-                        pan_y,
-                        zoom,
-                        offset_x,
-                        offset_y,
-                    ) {
+                    let point = match event_to_point(&move_canvas, &event, pan_x, pan_y, zoom) {
                         Some(point) => point,
                         None => return,
                     };
@@ -1201,28 +1141,22 @@ pub fn run() -> Result<(), JsValue> {
             };
             wheel_event.prevent_default();
             let rect = zoom_canvas.get_bounding_client_rect();
-            let (offset_x, offset_y, zoom, pan_x, pan_y) = {
+            let (zoom, pan_x, pan_y) = {
                 let state = zoom_state.borrow();
-                (
-                    state.board_offset_x,
-                    state.board_offset_y,
-                    state.zoom,
-                    state.pan_x,
-                    state.pan_y,
-                )
+                (state.zoom, state.pan_x, state.pan_y)
             };
             let cursor_x = wheel_event.client_x() as f64 - rect.left();
             let cursor_y = wheel_event.client_y() as f64 - rect.top();
-            let world_x = (cursor_x - pan_x - offset_x) / zoom;
-            let world_y = (cursor_y - pan_y - offset_y) / zoom;
+            let world_x = (cursor_x - pan_x) / zoom;
+            let world_y = (cursor_y - pan_y) / zoom;
             let zoom_factor = if wheel_event.delta_y() < 0.0 {
                 1.1
             } else {
                 0.9
             };
             let next_zoom = (zoom * zoom_factor).clamp(0.4, 4.0);
-            let next_pan_x = cursor_x - offset_x - world_x * next_zoom;
-            let next_pan_y = cursor_y - offset_y - world_y * next_zoom;
+            let next_pan_x = cursor_x - world_x * next_zoom;
+            let next_pan_y = cursor_y - world_y * next_zoom;
             {
                 let mut state = zoom_state.borrow_mut();
                 state.zoom = next_zoom;

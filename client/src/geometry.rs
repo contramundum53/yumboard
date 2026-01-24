@@ -17,21 +17,14 @@ pub fn normalize_point(point: Point) -> Option<Point> {
 }
 
 pub fn world_to_screen(state: &State, point: Point) -> (f64, f64) {
-    let x = point.x as f64 * state.zoom + state.board_offset_x + state.pan_x;
-    let y = point.y as f64 * state.zoom + state.board_offset_y + state.pan_y;
+    let x = point.x as f64 * state.zoom + state.pan_x;
+    let y = point.y as f64 * state.zoom + state.pan_y;
     (x, y)
 }
 
-fn world_to_screen_transform(
-    zoom: f64,
-    board_offset_x: f64,
-    board_offset_y: f64,
-    pan_x: f64,
-    pan_y: f64,
-    point: Point,
-) -> (f64, f64) {
-    let x = point.x as f64 * zoom + board_offset_x + pan_x;
-    let y = point.y as f64 * zoom + board_offset_y + pan_y;
+fn world_to_screen_transform(zoom: f64, pan_x: f64, pan_y: f64, point: Point) -> (f64, f64) {
+    let x = point.x as f64 * zoom + pan_x;
+    let y = point.y as f64 * zoom + pan_y;
     (x, y)
 }
 
@@ -78,8 +71,6 @@ pub fn selection_hit_test(
     strokes: &[Stroke],
     select: &SelectState,
     zoom: f64,
-    board_offset_x: f64,
-    board_offset_y: f64,
     pan_x: f64,
     pan_y: f64,
     screen_x: f64,
@@ -88,8 +79,6 @@ pub fn selection_hit_test(
     let bounds = selection_bounds(strokes, select)?;
     let (left, top) = world_to_screen_transform(
         zoom,
-        board_offset_x,
-        board_offset_y,
         pan_x,
         pan_y,
         Point {
@@ -99,8 +88,6 @@ pub fn selection_hit_test(
     );
     let (right, bottom) = world_to_screen_transform(
         zoom,
-        board_offset_x,
-        board_offset_y,
         pan_x,
         pan_y,
         Point {
@@ -336,24 +323,15 @@ pub fn distance_to_segment(px: f64, py: f64, x1: f64, y1: f64, x2: f64, y2: f64)
     ((px - proj_x).powi(2) + (py - proj_y).powi(2)).sqrt()
 }
 
-pub fn stroke_hit(
-    stroke: &Stroke,
-    px: f64,
-    py: f64,
-    zoom: f64,
-    offset_x: f64,
-    offset_y: f64,
-    pan_x: f64,
-    pan_y: f64,
-) -> bool {
+pub fn stroke_hit(stroke: &Stroke, px: f64, py: f64, zoom: f64, pan_x: f64, pan_y: f64) -> bool {
     if stroke.points.is_empty() {
         return false;
     }
     let threshold = (stroke.size as f64 * zoom * STROKE_UNIT / 2.0).max(6.0);
     if stroke.points.len() == 1 {
         let point = stroke.points[0];
-        let dx = point.x as f64 * zoom + offset_x + pan_x - px;
-        let dy = point.y as f64 * zoom + offset_y + pan_y - py;
+        let dx = point.x as f64 * zoom + pan_x - px;
+        let dy = point.y as f64 * zoom + pan_y - py;
         return dx * dx + dy * dy <= threshold * threshold;
     }
     for window in stroke.points.windows(2) {
@@ -362,10 +340,10 @@ pub fn stroke_hit(
         let distance = distance_to_segment(
             px,
             py,
-            start.x as f64 * zoom + offset_x + pan_x,
-            start.y as f64 * zoom + offset_y + pan_y,
-            end.x as f64 * zoom + offset_x + pan_x,
-            end.y as f64 * zoom + offset_y + pan_y,
+            start.x as f64 * zoom + pan_x,
+            start.y as f64 * zoom + pan_y,
+            end.x as f64 * zoom + pan_x,
+            end.y as f64 * zoom + pan_y,
         );
         if distance <= threshold {
             return true;

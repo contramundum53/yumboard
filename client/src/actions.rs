@@ -36,8 +36,6 @@ pub fn start_stroke(state: &mut State, id: String, color: String, size: f32, poi
     state.active_ids.insert(id);
     draw_dot(
         &state.ctx,
-        state.board_offset_x,
-        state.board_offset_y,
         state.zoom,
         state.pan_x,
         state.pan_y,
@@ -69,8 +67,6 @@ pub fn move_stroke(state: &mut State, id: &str, point: Point) {
         if from == to {
             draw_dot(
                 &state.ctx,
-                state.board_offset_x,
-                state.board_offset_y,
                 state.zoom,
                 state.pan_x,
                 state.pan_y,
@@ -81,8 +77,6 @@ pub fn move_stroke(state: &mut State, id: &str, point: Point) {
         } else {
             draw_segment(
                 &state.ctx,
-                state.board_offset_x,
-                state.board_offset_y,
                 state.zoom,
                 state.pan_x,
                 state.pan_y,
@@ -137,8 +131,8 @@ pub fn erase_hits_at_point(state: &mut State, point: Point) -> Vec<String> {
         Mode::Erase(EraseMode::Active { hits }) => hits,
         _ => return Vec::new(),
     };
-    let px = point.x as f64 * state.zoom + state.board_offset_x + state.pan_x;
-    let py = point.y as f64 * state.zoom + state.board_offset_y + state.pan_y;
+    let px = point.x as f64 * state.zoom + state.pan_x;
+    let py = point.y as f64 * state.zoom + state.pan_y;
     let mut removed = Vec::new();
     let mut index = state.strokes.len();
 
@@ -148,16 +142,7 @@ pub fn erase_hits_at_point(state: &mut State, point: Point) -> Vec<String> {
         if hits.contains(&stroke.id) {
             continue;
         }
-        if stroke_hit(
-            stroke,
-            px,
-            py,
-            state.zoom,
-            state.board_offset_x,
-            state.board_offset_y,
-            state.pan_x,
-            state.pan_y,
-        ) {
+        if stroke_hit(stroke, px, py, state.zoom, state.pan_x, state.pan_y) {
             let id = stroke.id.clone();
             state.strokes.remove(index);
             state.active_ids.remove(&id);
