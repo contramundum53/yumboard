@@ -1327,6 +1327,7 @@ fn draw_selection_overlay(state: &mut State) {
     if !state.lasso_points.is_empty() {
         let mut first = true;
         ctx.begin_path();
+        let _ = ctx.set_line_dash(&js_sys::Array::of2(&4.into(), &6.into()));
         for point in &state.lasso_points {
             let (x, y) = world_to_screen(state, *point);
             if first {
@@ -1337,6 +1338,7 @@ fn draw_selection_overlay(state: &mut State) {
             }
         }
         ctx.stroke();
+        let _ = ctx.set_line_dash(&js_sys::Array::new());
     }
 
     if let Some(bounds) = selection_bounds(state) {
