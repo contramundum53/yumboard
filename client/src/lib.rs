@@ -1967,7 +1967,7 @@ fn build_pdf_html(state: &State, include_background: bool) -> String {
     };
 
     format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\" /><style>@page{{margin:0;}}body{{margin:0;}}svg{{width:100vw;height:100vh;}}</style></head><body><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{min_x} {min_y} {width} {height}\" preserveAspectRatio=\"xMidYMid meet\">{background}{paths}</svg><script>window.onload=()=>{{window.print();}}</script></body></html>",
+        "<!doctype html><html><head><meta charset=\"utf-8\" /><style>@page{{margin:0;size:auto;}}html,body{{margin:0;padding:0;}}body{{display:block;}}svg{{display:block;width:100vw;height:100vh;}}</style></head><body><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{min_x} {min_y} {width} {height}\" preserveAspectRatio=\"xMidYMid meet\">{background}{paths}</svg><script>window.onload=()=>{{window.print();}}</script></body></html>",
         min_x = min_x,
         min_y = min_y,
         width = width,
