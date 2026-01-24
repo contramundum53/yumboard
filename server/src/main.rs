@@ -12,6 +12,7 @@ mod sessions;
 mod state;
 
 use crate::handlers::{root_handler, session_handler, ws_handler};
+use crate::sessions::save_session_backup;
 use crate::state::AppState;
 
 #[tokio::main]
@@ -26,6 +27,7 @@ async fn main() {
         sessions: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         session_dir,
     };
+    let backup_state = state.clone();
 
     let public_dir = parse_path_arg(&args, "--public-dir")
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../public"));
@@ -38,6 +40,24 @@ async fn main() {
         .fallback_service(ServeDir::new(public_dir).append_index_html_on_directories(true))
         .layer(axum::Extension(index_file))
         .with_state(state);
+
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            let sessions = {
+                let sessions = backup_state.sessions.read().await;
+                sessions
+                    .iter()
+                    .map(|(session_id, session)| (session_id.clone(), session.clone()))
+                    .collect::<Vec<_>>()
+            };
+            for (session_id, session) in sessions {
+                let strokes = session.strokes.read().await.clone();
+                save_session_backup(&backup_state.session_dir, &session_id, &strokes).await;
+            }
+        }
+    });
 
     let port: u16 = std::env::var("PORT")
         .ok()

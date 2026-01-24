@@ -43,3 +43,25 @@ pub async fn save_session(session_dir: &std::path::PathBuf, session_id: &str, st
         }
     }
 }
+
+pub async fn save_session_backup(
+    session_dir: &std::path::PathBuf,
+    session_id: &str,
+    strokes: &[Stroke],
+) {
+    let backup_dir = session_dir.join("backups");
+    if let Err(error) = tokio::fs::create_dir_all(&backup_dir).await {
+        eprintln!("Failed to create backup dir: {error}");
+        return;
+    }
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_secs())
+        .unwrap_or(0);
+    let path = backup_dir.join(format!("{session_id}-{ts}.json"));
+    if let Ok(payload) = serde_json::to_string(strokes) {
+        if let Err(error) = tokio::fs::write(path, payload).await {
+            eprintln!("Failed to backup session {session_id}: {error}");
+        }
+    }
+}
