@@ -99,13 +99,21 @@ body {
   cursor: pointer;
 }
 
+.hidden-color {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .palette-control {
   gap: 8px;
 }
 
 .palette {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: 1fr;
   gap: 6px;
 }
 

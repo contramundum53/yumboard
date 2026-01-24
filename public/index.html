@@ -17,11 +17,6 @@
     <!-- <span class="brand-sub">Live ink, shared fast.</span> -->
     <!-- </div> -->
 
-    <div class="control">
-      <!-- <label for="color">Ink</label> -->
-      <input id="color" type="color" value="#1f1f1f" />
-    </div>
-
     <div class="control palette-control">
       <div id="palette" class="palette" aria-label="Color palette"></div>
     </div>
@@ -75,6 +70,7 @@
     </button>
 
     <input id="loadFile" type="file" accept="application/json" hidden />
+    <input id="color" class="hidden-color" type="color" value="#1f1f1f" aria-hidden="true" tabindex="-1" />
 
     <button id="clear" class="button-base clear" type="button" aria-label="Clear board">
       <svg class="clear-icon" viewBox="0 0 512 512" role="img" aria-hidden="true">
