@@ -37,9 +37,16 @@ enum SelectionMode {
 
 enum SelectionHit {
     Move,
-    Scale,
+    Scale(ScaleAxis),
     Rotate,
     Trash,
+}
+
+#[derive(Clone, Copy)]
+enum ScaleAxis {
+    Both,
+    X,
+    Y,
 }
 
 struct Bounds {
@@ -78,8 +85,8 @@ struct State {
     transform_center: Point,
     transform_start: Point,
     transform_start_angle: f64,
-    transform_start_dist: f64,
     transform_snapshot: Vec<Stroke>,
+    transform_scale_axis: ScaleAxis,
 }
 
 #[wasm_bindgen(start)]
@@ -147,8 +154,8 @@ pub fn run() -> Result<(), JsValue> {
         transform_center: Point { x: 0.0, y: 0.0 },
         transform_start: Point { x: 0.0, y: 0.0 },
         transform_start_angle: 0.0,
-        transform_start_dist: 0.0,
         transform_snapshot: Vec::new(),
+        transform_scale_axis: ScaleAxis::Both,
     }));
 
     update_size_label(&size_input, &size_value);
@@ -609,13 +616,15 @@ pub fn run() -> Result<(), JsValue> {
                                 state.transform_snapshot = selected_strokes(&state);
                             }
                         }
-                        SelectionHit::Scale => {
+                        SelectionHit::Scale(axis) => {
                             if let Some(center) = selection_center(&state) {
-                                let distance = distance_between(center, world_point);
-                                if distance > 0.0 {
+                                let dx = (world_point.x - center.x) as f64;
+                                let dy = (world_point.y - center.y) as f64;
+                                if dx.abs() > f64::EPSILON || dy.abs() > f64::EPSILON {
                                     state.selection_mode = SelectionMode::Scale;
                                     state.transform_center = center;
-                                    state.transform_start_dist = distance;
+                                    state.transform_start = world_point;
+                                    state.transform_scale_axis = axis;
                                     state.transform_snapshot = selected_strokes(&state);
                                 }
                             }
@@ -765,21 +774,39 @@ pub fn run() -> Result<(), JsValue> {
                         }
                     }
                     SelectionMode::Scale => {
-                        let distance = distance_between(state.transform_center, world_point);
-                        if state.transform_start_dist > 0.0 {
-                            let factor = (distance / state.transform_start_dist).max(0.05);
-                            let updated = apply_scale(
-                                &state.transform_snapshot,
-                                state.transform_center,
-                                factor,
-                            );
-                            apply_transformed_strokes(&mut state, &updated);
-                            for stroke in updated {
-                                send_message(
-                                    &move_socket,
-                                    &ClientMessage::StrokeReplace { stroke },
-                                );
-                            }
+                        let center = state.transform_center;
+                        let start = state.transform_start;
+                        let axis = state.transform_scale_axis;
+                        let dx0 = (start.x - center.x) as f64;
+                        let dy0 = (start.y - center.y) as f64;
+                        let dx1 = (world_point.x - center.x) as f64;
+                        let dy1 = (world_point.y - center.y) as f64;
+                        let mut sx = if dx0.abs() > f64::EPSILON {
+                            (dx1 / dx0).abs()
+                        } else {
+                            1.0
+                        };
+                        let mut sy = if dy0.abs() > f64::EPSILON {
+                            (dy1 / dy0).abs()
+                        } else {
+                            1.0
+                        };
+                        match axis {
+                            ScaleAxis::Both => {}
+                            ScaleAxis::X => sy = 1.0,
+                            ScaleAxis::Y => sx = 1.0,
+                        }
+                        sx = sx.max(0.05);
+                        sy = sy.max(0.05);
+                        let updated = apply_scale_xy(
+                            &state.transform_snapshot,
+                            center,
+                            sx,
+                            sy,
+                        );
+                        apply_transformed_strokes(&mut state, &updated);
+                        for stroke in updated {
+                            send_message(&move_socket, &ClientMessage::StrokeReplace { stroke });
                         }
                     }
                     SelectionMode::Rotate => {
@@ -1301,6 +1328,10 @@ fn draw_selection_overlay(state: &mut State) {
         draw_handle(ctx, right, top, handle);
         draw_handle(ctx, left, bottom, handle);
         draw_handle(ctx, right, bottom, handle);
+        draw_handle(ctx, center_x, top, handle);
+        draw_handle(ctx, center_x, bottom, handle);
+        draw_handle(ctx, left, (top + bottom) / 2.0, handle);
+        draw_handle(ctx, right, (top + bottom) / 2.0, handle);
         draw_handle_circle(ctx, center_x, rotate_y, 6.0);
         draw_trash_handle(ctx, right + 18.0, top - 18.0, handle);
     }
@@ -1394,12 +1425,31 @@ fn selection_hit_test(state: &State, screen_x: f64, screen_y: f64) -> Option<Sel
     if hit_circle(screen_x, screen_y, center_x, rotate_y, 7.0) {
         return Some(SelectionHit::Rotate);
     }
-    if hit_rect(screen_x, screen_y, left, top, handle)
-        || hit_rect(screen_x, screen_y, right, top, handle)
-        || hit_rect(screen_x, screen_y, left, bottom, handle)
-        || hit_rect(screen_x, screen_y, right, bottom, handle)
-    {
-        return Some(SelectionHit::Scale);
+    if hit_rect(screen_x, screen_y, left, top, handle) {
+        return Some(SelectionHit::Scale(ScaleAxis::Both));
+    }
+    if hit_rect(screen_x, screen_y, right, top, handle) {
+        return Some(SelectionHit::Scale(ScaleAxis::Both));
+    }
+    if hit_rect(screen_x, screen_y, left, bottom, handle) {
+        return Some(SelectionHit::Scale(ScaleAxis::Both));
+    }
+    if hit_rect(screen_x, screen_y, right, bottom, handle) {
+        return Some(SelectionHit::Scale(ScaleAxis::Both));
+    }
+    let mid_top_x = (left + right) / 2.0;
+    let mid_left_y = (top + bottom) / 2.0;
+    if hit_rect(screen_x, screen_y, mid_top_x, top, handle) {
+        return Some(SelectionHit::Scale(ScaleAxis::Y));
+    }
+    if hit_rect(screen_x, screen_y, mid_top_x, bottom, handle) {
+        return Some(SelectionHit::Scale(ScaleAxis::Y));
+    }
+    if hit_rect(screen_x, screen_y, left, mid_left_y, handle) {
+        return Some(SelectionHit::Scale(ScaleAxis::X));
+    }
+    if hit_rect(screen_x, screen_y, right, mid_left_y, handle) {
+        return Some(SelectionHit::Scale(ScaleAxis::X));
     }
     if screen_x >= left && screen_x <= right && screen_y >= top && screen_y <= bottom {
         return Some(SelectionHit::Move);
@@ -1416,12 +1466,6 @@ fn hit_circle(x: f64, y: f64, cx: f64, cy: f64, radius: f64) -> bool {
     let dx = x - cx;
     let dy = y - cy;
     dx * dx + dy * dy <= radius * radius
-}
-
-fn distance_between(a: Point, b: Point) -> f64 {
-    let dx = a.x as f64 - b.x as f64;
-    let dy = a.y as f64 - b.y as f64;
-    (dx * dx + dy * dy).sqrt()
 }
 
 fn angle_between(center: Point, point: Point) -> f64 {
@@ -1465,7 +1509,7 @@ fn apply_translation(strokes: &[Stroke], dx: f32, dy: f32) -> Vec<Stroke> {
         .collect()
 }
 
-fn apply_scale(strokes: &[Stroke], center: Point, factor: f64) -> Vec<Stroke> {
+fn apply_scale_xy(strokes: &[Stroke], center: Point, sx: f64, sy: f64) -> Vec<Stroke> {
     let cx = center.x as f64;
     let cy = center.y as f64;
     strokes
@@ -1478,8 +1522,8 @@ fn apply_scale(strokes: &[Stroke], center: Point, factor: f64) -> Vec<Stroke> {
                 .points
                 .iter()
                 .map(|point| Point {
-                    x: (cx + (point.x as f64 - cx) * factor) as f32,
-                    y: (cy + (point.y as f64 - cy) * factor) as f32,
+                    x: (cx + (point.x as f64 - cx) * sx) as f32,
+                    y: (cy + (point.y as f64 - cy) * sy) as f32,
                 })
                 .collect(),
         })
