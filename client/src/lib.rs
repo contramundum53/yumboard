@@ -69,6 +69,7 @@ struct State {
     ctx: CanvasRenderingContext2d,
     strokes: Vec<Stroke>,
     active_ids: HashSet<String>,
+    load_reader: Option<FileReader>,
     board_width: f64,
     board_height: f64,
     board_scale: f64,
@@ -141,6 +142,7 @@ pub fn run() -> Result<(), JsValue> {
         ctx,
         strokes: Vec::new(),
         active_ids: HashSet::new(),
+        load_reader: None,
         board_width: 0.0,
         board_height: 0.0,
         board_scale: 0.0,
@@ -554,8 +556,8 @@ pub fn run() -> Result<(), JsValue> {
         let load_socket = socket.clone();
         let onload = std::rc::Rc::new(RefCell::new(None));
         let onload_clone = onload.clone();
-        let load_state = load_state.clone();
-        let load_socket = load_socket.clone();
+        let load_state_onload = load_state.clone();
+        let load_socket_onload = load_socket.clone();
         *onload.borrow_mut() = Some(Closure::<dyn FnMut(ProgressEvent)>::new(
             move |event: ProgressEvent| {
             let target = match event.target() {
@@ -572,18 +574,24 @@ pub fn run() -> Result<(), JsValue> {
             let Some(text) = result.as_string() else {
                 return;
             };
-            let Ok(data) = serde_json::from_str::<SaveData>(&text) else {
-                return;
+            let strokes = match serde_json::from_str::<SaveData>(&text) {
+                Ok(data) => data.strokes,
+                Err(_) => match serde_json::from_str::<Vec<Stroke>>(&text) {
+                    Ok(strokes) => strokes,
+                    Err(_) => return,
+                },
             };
             {
-                let mut state = load_state.borrow_mut();
-                adopt_strokes(&mut state, data.strokes.clone());
+                let mut state = load_state_onload.borrow_mut();
+                adopt_strokes(&mut state, strokes.clone());
+                state.load_reader = None;
             }
-            send_message(&load_socket, &ClientMessage::Load { strokes: data.strokes });
+            send_message(&load_socket_onload, &ClientMessage::Load { strokes });
         },
         ));
 
         let load_file_cb = load_file.clone();
+        let load_state_onchange = load_state.clone();
         let onchange = Closure::<dyn FnMut(Event)>::new(move |_| {
             let files = load_file_cb.files();
             let file = files.and_then(|list| list.get(0));
@@ -598,6 +606,10 @@ pub fn run() -> Result<(), JsValue> {
                 reader.set_onload(Some(handler.as_ref().unchecked_ref()));
             }
             let _ = reader.read_as_text(&file);
+            load_state_onchange
+                .borrow_mut()
+                .load_reader
+                .replace(reader);
         });
         load_file.add_event_listener_with_callback("change", onchange.as_ref().unchecked_ref())?;
         let handler = onload.borrow_mut().take();
