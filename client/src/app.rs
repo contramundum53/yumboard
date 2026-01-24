@@ -43,13 +43,6 @@ fn palette_selected(mode: &Mode) -> Option<usize> {
     }
 }
 
-fn mode_for_buttons(mode: &Mode) -> &Mode {
-    match mode {
-        Mode::Loading(loading) => loading.previous.as_ref(),
-        _ => mode,
-    }
-}
-
 fn sync_tool_ui(
     state: &State,
     pan_button: &HtmlButtonElement,
@@ -57,10 +50,9 @@ fn sync_tool_ui(
     lasso_button: &HtmlButtonElement,
     dragging: bool,
 ) {
-    let mode = mode_for_buttons(&state.mode);
-    let is_pan = matches!(mode, Mode::Pan(_));
-    let is_erase = matches!(mode, Mode::Erase(_));
-    let is_select = matches!(mode, Mode::Select(_));
+    let is_pan = matches!(state.mode, Mode::Pan(_));
+    let is_erase = matches!(state.mode, Mode::Erase(_));
+    let is_select = matches!(state.mode, Mode::Select(_));
     set_tool_button(pan_button, is_pan);
     set_tool_button(eraser_button, is_erase);
     set_tool_button(lasso_button, is_select);
@@ -85,6 +77,11 @@ fn take_loading_previous(state: &mut State) -> Option<Mode> {
             None
         }
     }
+}
+
+fn set_load_busy(load_button: &HtmlButtonElement, busy: bool) {
+    let value = if busy { "true" } else { "false" };
+    let _ = load_button.set_attribute("aria-busy", value);
 }
 
 #[wasm_bindgen(start)]
@@ -625,7 +622,11 @@ pub fn run() -> Result<(), JsValue> {
 
     {
         let load_file = load_file.clone();
+        let load_state = state.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
+            if matches!(load_state.borrow().mode, Mode::Loading(_)) {
+                return;
+            }
             load_file.set_value("");
             load_file.click();
         });
@@ -637,6 +638,7 @@ pub fn run() -> Result<(), JsValue> {
         let load_file_cb = load_file.clone();
         let load_state_onchange = state.clone();
         let load_socket_onchange = socket.clone();
+        let load_button_cb = load_button.clone();
         let onchange = Closure::<dyn FnMut(Event)>::new(move |_| {
             let files = load_file_cb.files();
             let file = files.and_then(|list| list.get(0));
@@ -655,6 +657,7 @@ pub fn run() -> Result<(), JsValue> {
             };
             let load_state_onload = load_state_onchange.clone();
             let load_socket_onload = load_socket_onchange.clone();
+            let load_button_onload = load_button_cb.clone();
             let onload = Closure::<dyn FnMut(ProgressEvent)>::new(move |event: ProgressEvent| {
                 let target = match event.target() {
                     Some(target) => target,
@@ -663,6 +666,7 @@ pub fn run() -> Result<(), JsValue> {
                         if let Some(previous) = take_loading_previous(&mut state) {
                             state.mode = previous;
                         }
+                        set_load_busy(&load_button_onload, false);
                         return;
                     }
                 };
@@ -673,6 +677,7 @@ pub fn run() -> Result<(), JsValue> {
                         if let Some(previous) = take_loading_previous(&mut state) {
                             state.mode = previous;
                         }
+                        set_load_busy(&load_button_onload, false);
                         return;
                     }
                 };
@@ -681,6 +686,7 @@ pub fn run() -> Result<(), JsValue> {
                     if let Some(previous) = take_loading_previous(&mut state) {
                         state.mode = previous;
                     }
+                    set_load_busy(&load_button_onload, false);
                     return;
                 };
                 let Some(text) = result.as_string() else {
@@ -688,12 +694,14 @@ pub fn run() -> Result<(), JsValue> {
                     if let Some(previous) = take_loading_previous(&mut state) {
                         state.mode = previous;
                     }
+                    set_load_busy(&load_button_onload, false);
                     return;
                 };
                 let strokes = parse_load_payload(&text);
                 {
                     let mut state = load_state_onload.borrow_mut();
                     let Some(previous) = take_loading_previous(&mut state) else {
+                        set_load_busy(&load_button_onload, false);
                         return;
                     };
                     state.mode = previous;
@@ -701,6 +709,7 @@ pub fn run() -> Result<(), JsValue> {
                         adopt_strokes(&mut state, strokes.clone());
                     }
                 }
+                set_load_busy(&load_button_onload, false);
                 if let Some(strokes) = strokes {
                     send_message(&load_socket_onload, &ClientMessage::Load { strokes });
                 }
@@ -715,6 +724,7 @@ pub fn run() -> Result<(), JsValue> {
                     onload: Some(onload),
                 });
             }
+            set_load_busy(&load_button_cb, true);
             let _ = reader.read_as_text(&file);
             let mut state = load_state_onchange.borrow_mut();
             if let Mode::Loading(loading) = &mut state.mode {

@@ -270,6 +270,11 @@ body {
   border-color: transparent;
 }
 
+.tool[aria-busy="true"] {
+  border-color: var(--accent-2);
+  animation: loadPulse 1.4s ease infinite;
+}
+
 .save-menu {
   position: relative;
   display: inline-flex;
@@ -405,6 +410,20 @@ body {
   100% {
     transform: scale(1);
     opacity: 0.8;
+  }
+}
+
+@keyframes loadPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(42, 157, 143, 0.35);
+  }
+
+  70% {
+    box-shadow: 0 0 0 6px rgba(42, 157, 143, 0.1);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(42, 157, 143, 0.35);
   }
 }
 
