@@ -574,12 +574,8 @@ pub fn run() -> Result<(), JsValue> {
             let Some(text) = result.as_string() else {
                 return;
             };
-            let strokes = match serde_json::from_str::<SaveData>(&text) {
-                Ok(data) => data.strokes,
-                Err(_) => match serde_json::from_str::<Vec<Stroke>>(&text) {
-                    Ok(strokes) => strokes,
-                    Err(_) => return,
-                },
+            let Some(strokes) = parse_load_payload(&text) else {
+                return;
             };
             {
                 let mut state = load_state_onload.borrow_mut();
@@ -1216,6 +1212,51 @@ fn set_canvas_mode(canvas: &HtmlCanvasElement, tool: Tool, dragging: bool) {
 fn set_status(status_el: &Element, status_text: &Element, state: &str, text: &str) {
     let _ = status_el.set_attribute("data-state", state);
     status_text.set_text_content(Some(text));
+}
+
+fn parse_load_payload(text: &str) -> Option<Vec<Stroke>> {
+    if let Some(strokes) = try_parse_strokes(text) {
+        return Some(strokes);
+    }
+    let trimmed = text.trim();
+    if let Some(payload) = extract_data_url_payload(trimmed) {
+        if let Some(strokes) = try_parse_strokes(&payload) {
+            return Some(strokes);
+        }
+        if let Some(decoded) = decode_uri_string(&payload) {
+            if let Some(strokes) = try_parse_strokes(&decoded) {
+                return Some(strokes);
+            }
+        }
+    }
+    if let Some(decoded) = decode_uri_string(trimmed) {
+        if let Some(strokes) = try_parse_strokes(&decoded) {
+            return Some(strokes);
+        }
+    }
+    None
+}
+
+fn try_parse_strokes(text: &str) -> Option<Vec<Stroke>> {
+    if let Ok(data) = serde_json::from_str::<SaveData>(text) {
+        return Some(data.strokes);
+    }
+    serde_json::from_str::<Vec<Stroke>>(text).ok()
+}
+
+fn extract_data_url_payload(text: &str) -> Option<String> {
+    let trimmed = text.trim_start();
+    if !trimmed.starts_with("data:") {
+        return None;
+    }
+    let (_, payload) = trimmed.split_once(',')?;
+    Some(payload.to_string())
+}
+
+fn decode_uri_string(text: &str) -> Option<String> {
+    js_sys::decode_uri_component(text)
+        .ok()
+        .and_then(|value| value.as_string())
 }
 
 fn normalize_palette_color(value: &str) -> Option<String> {
