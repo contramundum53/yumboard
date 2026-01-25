@@ -964,21 +964,33 @@ pub fn run() -> Result<(), JsValue> {
                             let dy0 = (start.y - anchor.y) as f64;
                             let dx1 = (world_point.x - anchor.x) as f64;
                             let dy1 = (world_point.y - anchor.y) as f64;
-                            let mut sx = if dx0.abs() > f64::EPSILON {
-                                dx1 / dx0
-                            } else {
-                                1.0
+                            let (mut sx, mut sy) = match axis {
+                                ScaleAxis::Both => {
+                                    let denom = dx0 * dx0 + dy0 * dy0;
+                                    let scale = if denom > f64::EPSILON {
+                                        (dx1 * dx0 + dy1 * dy0) / denom
+                                    } else {
+                                        1.0
+                                    };
+                                    (scale, scale)
+                                }
+                                ScaleAxis::X => {
+                                    let scale = if dx0.abs() > f64::EPSILON {
+                                        dx1 / dx0
+                                    } else {
+                                        1.0
+                                    };
+                                    (scale, 1.0)
+                                }
+                                ScaleAxis::Y => {
+                                    let scale = if dy0.abs() > f64::EPSILON {
+                                        dy1 / dy0
+                                    } else {
+                                        1.0
+                                    };
+                                    (1.0, scale)
+                                }
                             };
-                            let mut sy = if dy0.abs() > f64::EPSILON {
-                                dy1 / dy0
-                            } else {
-                                1.0
-                            };
-                            match axis {
-                                ScaleAxis::Both => {}
-                                ScaleAxis::X => sy = 1.0,
-                                ScaleAxis::Y => sx = 1.0,
-                            }
                             sx = clamp_scale(sx, 0.05);
                             sy = clamp_scale(sy, 0.05);
                             let updated = apply_scale_xy(snapshot, *anchor, sx, sy);
