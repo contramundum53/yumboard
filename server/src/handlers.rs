@@ -83,11 +83,11 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: String) {
             Message::Text(text) => {
                 let parsed = serde_json::from_str::<ClientMessage>(&text);
                 if let Ok(client_message) = parsed {
-                    if let Some((server_messages, include_sender)) = apply_client_message(
-                        &mut *session.write().await,
-                        connection_id,
-                        client_message,
-                    ) {
+                    let result = {
+                        let mut session_guard = session.write().await;
+                        apply_client_message(&mut session_guard, connection_id, client_message)
+                    };
+                    if let Some((server_messages, include_sender)) = result {
                         for server_message in server_messages {
                             if include_sender {
                                 broadcast_all(&session, server_message).await;
