@@ -2,9 +2,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use pfboard_shared::Stroke;
 use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
+use yumboard_shared::Stroke;
 
 pub const MAX_STROKES: usize = 2000;
 pub const MAX_POINTS_PER_STROKE: usize = 5000;
@@ -20,7 +20,7 @@ pub struct Session {
     pub active_ids: HashSet<String>,
     pub owners: HashMap<String, Uuid>,
     pub histories: HashMap<Uuid, ClientHistory>,
-    pub peers: HashMap<Uuid, mpsc::UnboundedSender<pfboard_shared::ServerMessage>>,
+    pub peers: HashMap<Uuid, mpsc::UnboundedSender<yumboard_shared::ServerMessage>>,
     pub transform_sessions: HashMap<Uuid, TransformSession>,
     pub dirty: bool,
 }

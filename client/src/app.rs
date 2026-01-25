@@ -10,7 +10,7 @@ use web_sys::{
     PointerEvent, ProgressEvent, WebSocket,
 };
 
-use pfboard_shared::{ClientMessage, ServerMessage, Stroke};
+use yumboard_shared::{ClientMessage, ServerMessage, Stroke};
 
 use crate::actions::{
     adopt_strokes, apply_transformed_strokes, clear_board, end_stroke, erase_hits_at_point,

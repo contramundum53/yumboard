@@ -14,7 +14,7 @@ wasm-pack build client --target web --out-dir ../public/pkg
 Start the server:
 
 ```sh
-cargo run -p pfboard_server
+cargo run -p yumboard_server
 ```
 
 Open http://localhost:3000 in multiple tabs or devices on the same network.

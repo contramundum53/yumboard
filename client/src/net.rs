@@ -1,7 +1,7 @@
 use wasm_bindgen::JsValue;
 use web_sys::{WebSocket, Window};
 
-use pfboard_shared::ClientMessage;
+use yumboard_shared::ClientMessage;
 
 pub fn websocket_url(window: &Window) -> Result<String, JsValue> {
     let location = window.location();

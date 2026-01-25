@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use pfboard_shared::{ClientMessage, Point, ServerMessage, Stroke};
 use tokio::sync::RwLock;
 use uuid::Uuid;
+use yumboard_shared::{ClientMessage, Point, ServerMessage, Stroke};
 
 use crate::state::{Action, Session, TransformSession, MAX_POINTS_PER_STROKE, MAX_STROKES};
 

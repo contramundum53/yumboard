@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use pfboard_shared::Stroke;
 use uuid::Uuid;
+use yumboard_shared::Stroke;
 
 use crate::logic::sanitize_strokes;
 use crate::state::{AppState, Session};

@@ -5,7 +5,7 @@ use web_sys::{
     PointerEvent, Window,
 };
 
-use pfboard_shared::Point;
+use yumboard_shared::Point;
 
 use crate::geometry;
 use crate::geometry::normalize_point;

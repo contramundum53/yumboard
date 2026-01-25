@@ -1,5 +1,5 @@
-use pfboard_shared::{Point, Stroke};
 use web_sys::CanvasRenderingContext2d;
+use yumboard_shared::{Point, Stroke};
 
 use crate::geometry::{selection_bounds, world_to_screen};
 use crate::state::{Mode, SelectMode, SelectState, State, STROKE_UNIT};

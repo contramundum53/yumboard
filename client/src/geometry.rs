@@ -1,4 +1,4 @@
-use pfboard_shared::{Point, Stroke};
+use yumboard_shared::{Point, Stroke};
 
 use crate::state::{ScaleAxis, ScaleHandle, SelectState, SelectionHit, State, STROKE_UNIT};
 

@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use wasm_bindgen::prelude::Closure;
 use web_sys::{CanvasRenderingContext2d, FileReader, HtmlCanvasElement, ProgressEvent};
 
-use pfboard_shared::{Point, Stroke};
+use yumboard_shared::{Point, Stroke};
 
 pub const DEFAULT_PALETTE: [&str; 1] = ["#1f1f1f"];
 pub const STROKE_UNIT: f64 = 1.0;

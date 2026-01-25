@@ -2,7 +2,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{Document, Event, HtmlIFrameElement};
 
-use pfboard_shared::Stroke;
+use yumboard_shared::Stroke;
 
 use crate::state::{State, STROKE_UNIT};
 

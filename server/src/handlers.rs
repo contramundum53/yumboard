@@ -5,9 +5,9 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Redirect};
 use futures_util::{SinkExt, StreamExt};
-use pfboard_shared::{ClientMessage, ServerMessage};
 use tokio::sync::mpsc;
 use uuid::Uuid;
+use yumboard_shared::{ClientMessage, ServerMessage};
 
 use crate::logic::{apply_client_message, broadcast_all, broadcast_except};
 use crate::sessions::{get_or_create_session, new_session_id, normalize_session_id, save_session};

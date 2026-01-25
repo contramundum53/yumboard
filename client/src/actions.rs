@@ -1,4 +1,4 @@
-use pfboard_shared::{Point, Stroke};
+use yumboard_shared::{Point, Stroke};
 
 use crate::geometry::{home_zoom_pan, normalize_point, stroke_hit};
 use crate::render::{draw_dot, draw_segment, redraw};
