@@ -599,7 +599,7 @@ pub fn run() -> Result<(), JsValue> {
             if let Ok(element) = document.create_element("a") {
                 if let Ok(anchor) = element.dyn_into::<HtmlAnchorElement>() {
                     anchor.set_href(&href);
-                    anchor.set_download("pfboard.json");
+                    anchor.set_download("yumboard.json");
                     anchor.click();
                 }
             }

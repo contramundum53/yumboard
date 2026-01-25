@@ -1,4 +1,4 @@
-# Pulseboard (Rust + WASM)
+# YumBoard (Rust + WASM)
 
 A collaborative whiteboard with a Rust WebSocket server and a WebAssembly client.
 
