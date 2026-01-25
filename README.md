@@ -1,20 +1,11 @@
-# YumBoard (Rust + WASM)
+# YumBoard
 
-A collaborative whiteboard with a Rust WebSocket server and a WebAssembly client.
+A simple collaborative whiteboard.
 
-## Run it
-
-Build the client (repeat when client code changes):
+## Run the Server
 
 ```sh
 cargo install wasm-pack
-wasm-pack build client --target web --out-dir ../public/pkg
+wasm-pack build client --release --target web --out-dir ../public/pkg
+cargo run --release -p yumboard_server --sessions-dir ./sessions
 ```
-
-Start the server:
-
-```sh
-cargo run -p yumboard_server
-```
-
-Open http://localhost:3000 in multiple tabs or devices on the same network.

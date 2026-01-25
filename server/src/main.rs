@@ -21,7 +21,7 @@ use crate::state::AppState;
 struct Args {
     // Directory to store session data
     #[arg(long)]
-    session_dir: Option<PathBuf>,
+    sessions_dir: Option<PathBuf>,
 
     // Directory to serve static files from
     #[arg(long)]
@@ -91,7 +91,7 @@ async fn shutdown_signal(app_state: AppState) {
 async fn main() {
     let args = Args::parse();
     let session_dir = args
-        .session_dir
+        .sessions_dir
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../sessions"));
     if let Err(error) = tokio::fs::create_dir_all(&session_dir).await {
         eprintln!("Failed to create session dir: {error}");
