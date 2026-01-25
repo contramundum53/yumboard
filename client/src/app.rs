@@ -4,7 +4,6 @@ use std::rc::Rc;
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::window;
 use web_sys::{
     CanvasRenderingContext2d, Event, FileReader, HtmlAnchorElement, HtmlButtonElement,
     HtmlCanvasElement, HtmlElement, HtmlInputElement, HtmlSpanElement, KeyboardEvent, MessageEvent,

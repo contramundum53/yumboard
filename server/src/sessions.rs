@@ -22,6 +22,7 @@ pub async fn get_or_create_session(
     if let Some(session) = state.sessions.read().await.get(session_id).cloned() {
         return session;
     }
+    eprintln!("Loading/Creating session {session_id}...");
     let strokes = load_session(&state.session_dir, session_id)
         .await
         .unwrap_or_default();

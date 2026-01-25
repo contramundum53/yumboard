@@ -114,17 +114,18 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: String) {
     let mut should_remove = false;
     let mut maybe_strokes = None;
     {
-        let mut session_guard = session.write().await;
+        let session_guard = session.read().await;
         if session_guard.peers.is_empty() {
             should_remove = true;
             if session_guard.dirty {
-                session_guard.dirty = false;
                 maybe_strokes = Some(session_guard.strokes.clone());
             }
         }
     }
     if let Some(strokes) = maybe_strokes {
+        eprint!("Saving finished session {session_id}... ");
         save_session(&state.session_dir, &session_id, &strokes).await;
+        eprintln!("done.");
     }
     if should_remove {
         let mut sessions = state.sessions.write().await;
