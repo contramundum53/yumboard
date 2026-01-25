@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use axum::routing::get;
 use axum::Router;
+use clap::Parser;
 use tower_http::services::ServeDir;
 
 mod handlers;
@@ -15,10 +16,20 @@ use crate::handlers::{root_handler, session_handler, ws_handler};
 use crate::sessions::save_session;
 use crate::state::AppState;
 
+#[derive(Parser)]
+#[command(author, version, about)]
+struct Args {
+    #[arg(long)]
+    session_dir: Option<PathBuf>,
+    #[arg(long)]
+    public_dir: Option<PathBuf>,
+}
+
 #[tokio::main]
 async fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    let session_dir = parse_path_arg(&args, "--session-dir")
+    let args = Args::parse();
+    let session_dir = args
+        .session_dir
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../sessions"));
     if let Err(error) = tokio::fs::create_dir_all(&session_dir).await {
         eprintln!("Failed to create session dir: {error}");
@@ -29,7 +40,8 @@ async fn main() {
     };
     let backup_state = state.clone();
 
-    let public_dir = parse_path_arg(&args, "--public-dir")
+    let public_dir = args
+        .public_dir
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../public"));
     let index_file = public_dir.join("index.html");
 
@@ -80,12 +92,4 @@ async fn main() {
         .await
         .expect("Failed to bind server");
     axum::serve(listener, app).await.expect("Server crashed");
-}
-
-fn parse_path_arg(args: &[String], name: &str) -> Option<PathBuf> {
-    let value = args
-        .iter()
-        .position(|arg| arg == name)
-        .and_then(|index| args.get(index + 1));
-    value.map(PathBuf::from)
 }
