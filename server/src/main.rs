@@ -30,6 +30,9 @@ struct Args {
     // Interval (in seconds) for periodic backups
     #[arg(long, default_value_t = 60u64)]
     backup_interval: u64,
+
+    #[arg(long, default_value_t = 3000)]
+    port: u16,
 }
 
 async fn save_all_sessions(state: &AppState, reset_dirty: bool) {
@@ -129,12 +132,8 @@ async fn main() {
         shutdown_signal(backup_state2).await;
     });
 
-    let port: u16 = std::env::var("PORT")
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(3000);
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    println!("Whiteboard running at http://localhost:{port}");
+    let addr = SocketAddr::from(([0, 0, 0, 0], args.port));
+    println!("Whiteboard running at http://localhost:{}", args.port);
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await
