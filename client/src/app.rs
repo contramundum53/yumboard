@@ -121,6 +121,7 @@ pub fn run() -> Result<(), JsValue> {
     let lasso_button: HtmlButtonElement = get_element(&document, "lasso")?;
     let eraser_button: HtmlButtonElement = get_element(&document, "eraser")?;
     let pan_button: HtmlButtonElement = get_element(&document, "pan")?;
+    let home_button: HtmlButtonElement = get_element(&document, "home")?;
     let status_el = document
         .get_element_by_id("status")
         .ok_or_else(|| JsValue::from_str("Missing status element"))?;
@@ -420,6 +421,22 @@ pub fn run() -> Result<(), JsValue> {
             );
         });
         pan_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
+        onclick.forget();
+    }
+
+    {
+        let home_state = state.clone();
+        let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
+            let mut state = home_state.borrow_mut();
+            if matches!(state.mode, Mode::Loading(_)) {
+                return;
+            }
+            state.zoom = 1.0;
+            state.pan_x = 0.0;
+            state.pan_y = 0.0;
+            redraw(&mut state);
+        });
+        home_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
     }
 
