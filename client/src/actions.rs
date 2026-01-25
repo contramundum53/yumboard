@@ -1,6 +1,6 @@
 use pfboard_shared::{Point, Stroke};
 
-use crate::geometry::{normalize_point, stroke_hit};
+use crate::geometry::{home_zoom_pan, normalize_point, stroke_hit};
 use crate::render::{draw_dot, draw_segment, redraw};
 use crate::state::{EraseMode, Mode, SelectMode, State};
 
@@ -174,6 +174,11 @@ pub fn adopt_strokes(state: &mut State, strokes: Vec<Stroke>) {
         select.selected_ids.clear();
         select.mode = SelectMode::Idle;
     }
+
+    let (zoom, pan_x, pan_y) = home_zoom_pan(&state);
+    state.zoom = zoom;
+    state.pan_x = pan_x;
+    state.pan_y = pan_y;
     redraw(state);
 }
 

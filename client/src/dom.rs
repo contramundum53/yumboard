@@ -7,6 +7,7 @@ use web_sys::{
 
 use pfboard_shared::Point;
 
+use crate::geometry;
 use crate::geometry::normalize_point;
 use crate::render::redraw;
 use crate::state::{Mode, State};
@@ -56,6 +57,13 @@ pub fn set_status(status_el: &Element, status_text: &Element, state: &str, text:
 pub fn resize_canvas(window: &Window, state: &mut State) {
     let last_board_width = state.board_width;
     let last_board_height = state.board_height;
+    web_sys::console::log_1(
+        &format!(
+            "Resizing canvas from {}x{}",
+            last_board_width, last_board_height
+        )
+        .into(),
+    );
 
     let rect = state.canvas.get_bounding_client_rect();
     let dpr = window.device_pixel_ratio();
@@ -64,8 +72,18 @@ pub fn resize_canvas(window: &Window, state: &mut State) {
     let _ = state.ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
     state.board_width = rect.width();
     state.board_height = rect.height();
-    state.pan_x += (state.board_width - last_board_width) / 2.0;
-    state.pan_y += (state.board_height - last_board_height) / 2.0;
+
+    if last_board_width == 0.0 || last_board_height == 0.0 {
+        web_sys::console::log_1(&"Initial canvas size, resetting to home view".into());
+        let (zoom, pan_x, pan_y) = geometry::home_zoom_pan(&state);
+
+        state.zoom = zoom;
+        state.pan_x = pan_x;
+        state.pan_y = pan_y;
+    } else {
+        state.pan_x += (state.board_width - last_board_width) / 2.0;
+        state.pan_y += (state.board_height - last_board_height) / 2.0;
+    }
     redraw(state);
 }
 

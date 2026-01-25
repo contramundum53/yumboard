@@ -28,18 +28,12 @@ fn world_to_screen_transform(zoom: f64, pan_x: f64, pan_y: f64, point: Point) ->
     (x, y)
 }
 
-pub fn selection_bounds(strokes: &[Stroke], select: &SelectState) -> Option<Bounds> {
-    if select.selected_ids.is_empty() {
-        return None;
-    }
+pub fn bounds<'a>(strokes: impl Iterator<Item = &'a Stroke>) -> Option<Bounds> {
     let mut min_x = f64::MAX;
     let mut min_y = f64::MAX;
     let mut max_x = f64::MIN;
     let mut max_y = f64::MIN;
     for stroke in strokes {
-        if !select.selected_ids.iter().any(|id| id == &stroke.id) {
-            continue;
-        }
         for point in &stroke.points {
             min_x = min_x.min(point.x as f64);
             min_y = min_y.min(point.y as f64);
@@ -57,6 +51,14 @@ pub fn selection_bounds(strokes: &[Stroke], select: &SelectState) -> Option<Boun
             max_y,
         })
     }
+}
+
+pub fn selection_bounds(strokes: &[Stroke], select: &SelectState) -> Option<Bounds> {
+    bounds(
+        strokes
+            .iter()
+            .filter(|stroke| select.selected_ids.iter().any(|id| id == &stroke.id)),
+    )
 }
 
 pub fn selection_center(strokes: &[Stroke], select: &SelectState) -> Option<Point> {
@@ -350,4 +352,67 @@ pub fn stroke_hit(stroke: &Stroke, px: f64, py: f64, zoom: f64, pan_x: f64, pan_
         }
     }
     false
+}
+
+pub fn home_zoom_pan(state: &State) -> (f64, f64, f64) {
+    let bounds = bounds(state.strokes.iter());
+    const STANDARD_DISPLAY_SIZE: f64 = 1000.0;
+    let standard_zoom = state.board_height.min(state.board_width) / STANDARD_DISPLAY_SIZE;
+    let (zoom, center_x, center_y) = if let Some(bounds) = bounds {
+        web_sys::console::log_1(
+            &format!(
+                "Content bounds: min_x={}, min_y={}, max_x={}, max_y={}",
+                bounds.min_x, bounds.min_y, bounds.max_x, bounds.max_y
+            )
+            .into(),
+        );
+        let content_width = bounds.max_x.max(0.0) - bounds.min_x.min(0.0);
+        let content_height = bounds.max_y.max(0.0) - bounds.min_y.min(0.0);
+        let effective_board_width = state.board_width / 1.1;
+        let effective_board_height = state.board_height / 1.1;
+
+        web_sys::console::log_1(
+            &format!(
+                "Content size: width={}, height={}",
+                content_width, content_height
+            )
+            .into(),
+        );
+        web_sys::console::log_1(
+            &format!(
+                "Effective board size: width={}, height={}",
+                effective_board_width, effective_board_height
+            )
+            .into(),
+        );
+        let zoom = (effective_board_width / content_width)
+            .min(effective_board_height / content_height)
+            .min(standard_zoom);
+
+        web_sys::console::log_1(&format!("Calculated home zoom: {}", zoom).into());
+
+        let centering_func = |zoom: f64, content_min: f64, content_max: f64, window_size: f64| {
+            if content_min.abs().max(content_max.abs()) * zoom < window_size / 2.0 {
+                0.0
+            } else if content_max.abs() > content_min.abs() {
+                content_max - window_size / 2.0 / zoom
+            } else {
+                content_min + window_size / 2.0 / zoom
+            }
+        };
+
+        (
+            zoom,
+            centering_func(zoom, bounds.min_x, bounds.max_x, effective_board_width),
+            centering_func(zoom, bounds.min_y, bounds.max_y, effective_board_height),
+        )
+    } else {
+        (standard_zoom, 0.0, 0.0)
+    };
+
+    (
+        zoom,
+        state.board_width / 2.0 - center_x * zoom,
+        state.board_height / 2.0 - center_y * zoom,
+    )
 }

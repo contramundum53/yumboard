@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use web_sys::window;
 use web_sys::{
     CanvasRenderingContext2d, Event, FileReader, HtmlAnchorElement, HtmlButtonElement,
     HtmlCanvasElement, HtmlElement, HtmlInputElement, HtmlSpanElement, KeyboardEvent, MessageEvent,
@@ -21,6 +22,7 @@ use crate::dom::{
     event_to_point, get_element, resize_canvas, set_canvas_mode, set_status, set_tool_button,
     update_size_label,
 };
+use crate::geometry;
 use crate::geometry::{
     angle_between, apply_rotation, apply_scale_xy, apply_translation, clamp_scale,
     selected_strokes, selection_center, selection_hit_test,
@@ -431,9 +433,10 @@ pub fn run() -> Result<(), JsValue> {
             if matches!(state.mode, Mode::Loading(_)) {
                 return;
             }
-            state.zoom = 1.0;
-            state.pan_x = 0.0;
-            state.pan_y = 0.0;
+            let (zoom, pan_x, pan_y) = geometry::home_zoom_pan(&state);
+            state.zoom = zoom;
+            state.pan_x = pan_x;
+            state.pan_y = pan_y;
             redraw(&mut state);
         });
         home_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
@@ -1178,12 +1181,10 @@ pub fn run() -> Result<(), JsValue> {
             let cursor_y = wheel_event.client_y() as f64 - rect.top();
             let world_x = (cursor_x - pan_x) / zoom;
             let world_y = (cursor_y - pan_y) / zoom;
-            let zoom_factor = if wheel_event.delta_y() < 0.0 {
-                1.1
-            } else {
-                0.9
-            };
-            let next_zoom = (zoom * zoom_factor).clamp(0.4, 4.0);
+
+            const UNIT_SCROLL: f64 = 200.0;
+            let zoom_factor = (wheel_event.delta_y() / UNIT_SCROLL).exp();
+            let next_zoom = zoom * zoom_factor;
             let next_pan_x = cursor_x - world_x * next_zoom;
             let next_pan_y = cursor_y - world_y * next_zoom;
             {
