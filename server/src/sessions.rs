@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
 use pfboard_shared::Stroke;
-use serde::{Deserialize, Serialize};
-use serde_bytes::ByteBuf;
 use uuid::Uuid;
 
 use crate::logic::sanitize_strokes;
@@ -51,20 +49,10 @@ pub async fn save_session(session_dir: &std::path::PathBuf, session_id: &str, st
     }
 }
 
-#[derive(Serialize, Deserialize)]
-struct StrokeArchive {
-    data: ByteBuf,
-}
-
 fn encode_strokes(strokes: &[Stroke]) -> Vec<u8> {
-    let payload = bincode::serialize(strokes).unwrap_or_default();
-    let archive = StrokeArchive {
-        data: ByteBuf::from(payload),
-    };
-    bincode::serialize(&archive).unwrap_or_default()
+    bincode::serialize(strokes).unwrap_or_default()
 }
 
 fn decode_strokes(payload: &[u8]) -> Option<Vec<Stroke>> {
-    let archive: StrokeArchive = bincode::deserialize(payload).ok()?;
-    bincode::deserialize(&archive.data).ok()
+    bincode::deserialize(payload).ok()
 }
