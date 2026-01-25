@@ -34,9 +34,17 @@ pub struct ClientHistory {
 pub enum Action {
     AddStroke(Stroke),
     EraseStroke(Stroke),
-    Clear { strokes: Vec<Stroke> },
-    ReplaceStroke { before: Stroke, after: Stroke },
-    Transform { before: Vec<Stroke>, after: Vec<Stroke> },
+    Clear {
+        strokes: Vec<Stroke>,
+    },
+    ReplaceStroke {
+        before: Stroke,
+        after: Stroke,
+    },
+    Transform {
+        before: Vec<Stroke>,
+        after: Vec<Stroke>,
+    },
 }
 
 pub struct TransformSession {

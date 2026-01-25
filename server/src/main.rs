@@ -79,9 +79,7 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .expect("Failed to bind server");
-    axum::serve(listener, app)
-        .await
-        .expect("Server crashed");
+    axum::serve(listener, app).await.expect("Server crashed");
 }
 
 fn parse_path_arg(args: &[String], name: &str) -> Option<PathBuf> {
