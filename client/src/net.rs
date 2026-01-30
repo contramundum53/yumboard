@@ -6,13 +6,27 @@ use yumboard_shared::ClientMessage;
 pub fn websocket_url(window: &Window) -> Result<String, JsValue> {
     let location = window.location();
     let protocol = location.protocol()?;
-    let host = location.host()?;
+    let hostname = location.hostname()?;
+    let port = location.port()?;
     let scheme = if protocol == "https:" { "wss" } else { "ws" };
+    let host = if port.is_empty() {
+        format_host(&hostname)
+    } else {
+        format!("{}:{}", format_host(&hostname), port)
+    };
     let session_id = session_id_from_location(&location);
     if let Some(session_id) = session_id {
         Ok(format!("{scheme}://{host}/ws/{session_id}"))
     } else {
         Ok(format!("{scheme}://{host}/ws"))
+    }
+}
+
+fn format_host(hostname: &str) -> String {
+    if hostname.contains(':') && !hostname.starts_with('[') {
+        format!("[{hostname}]")
+    } else {
+        hostname.to_string()
     }
 }
 
