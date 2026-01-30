@@ -2,10 +2,13 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use axum::http::header::{CACHE_CONTROL, EXPIRES, PRAGMA};
+use axum::http::HeaderValue;
 use axum::routing::get;
 use axum::Router;
 use clap::Parser;
 use tower_http::services::ServeDir;
+use tower_http::set_header::SetResponseHeaderLayer;
 
 mod handlers;
 mod logic;
@@ -119,6 +122,18 @@ async fn main() {
         .route("/s/:session_id", get(session_handler))
         .route("/ws/:session_id", get(ws_handler))
         .fallback_service(ServeDir::new(public_dir).append_index_html_on_directories(true))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            CACHE_CONTROL,
+            HeaderValue::from_static("no-store, no-cache, must-revalidate, max-age=0"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            PRAGMA,
+            HeaderValue::from_static("no-cache"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            EXPIRES,
+            HeaderValue::from_static("0"),
+        ))
         .layer(axum::Extension(index_file))
         .with_state(state);
 
