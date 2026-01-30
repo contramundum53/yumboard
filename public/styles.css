@@ -473,12 +473,19 @@ body {
   }
 
   .range-control {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     height: 160px;
+    width: 34px;
   }
 
   #size {
     writing-mode: horizontal-tb;
     transform: rotate(-90deg);
     transform-origin: center;
+    width: 130px;
+    height: 34px;
+    margin: 0;
   }
 }
