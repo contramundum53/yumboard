@@ -4,3 +4,4 @@
 /public/pkg
 .DS_Store
 /sessions
+/k8s
