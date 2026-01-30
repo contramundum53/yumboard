@@ -470,4 +470,14 @@ body {
     flex-direction: column;
     align-items: center;
   }
+
+  .range-control {
+    height: 160px;
+  }
+
+  #size {
+    writing-mode: horizontal-tb;
+    transform: rotate(-90deg);
+    transform-origin: center;
+  }
 }
