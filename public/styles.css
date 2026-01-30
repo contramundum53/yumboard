@@ -103,7 +103,7 @@ body {
 }
 
 .hidden-color {
-  position: fixed;
+  position: absolute;
   left: 0;
   top: 0;
   width: 28px;
@@ -115,10 +115,11 @@ body {
   background: none;
   z-index: 10;
   border-radius: 8px;
+  transform: none;
 }
 
 .hidden-color.active {
-  opacity: 1;
+  opacity: 0.001;
   pointer-events: auto;
 }
 

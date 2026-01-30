@@ -5,7 +5,7 @@ use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
-    CanvasRenderingContext2d, Event, FileReader, HtmlAnchorElement, HtmlButtonElement,
+    CanvasRenderingContext2d, Element, Event, FileReader, HtmlAnchorElement, HtmlButtonElement,
     HtmlCanvasElement, HtmlElement, HtmlInputElement, HtmlSpanElement, KeyboardEvent, MessageEvent,
     PointerEvent, ProgressEvent, WebSocket,
 };
@@ -79,9 +79,22 @@ fn show_color_input(
         return;
     };
     let rect = node.get_bounding_client_rect();
+    let toolbar_rect = palette_el
+        .closest(".toolbar")
+        .ok()
+        .flatten()
+        .map(|toolbar: Element| toolbar.get_bounding_client_rect());
     let style = color_input.style();
-    let _ = style.set_property("left", &format!("{}px", rect.left()));
-    let _ = style.set_property("top", &format!("{}px", rect.top()));
+    let (left, top) = if let Some(toolbar_rect) = toolbar_rect {
+        (
+            rect.left() - toolbar_rect.left(),
+            rect.top() - toolbar_rect.top(),
+        )
+    } else {
+        (rect.left(), rect.top())
+    };
+    let _ = style.set_property("left", &format!("{}px", left));
+    let _ = style.set_property("top", &format!("{}px", top));
     let _ = style.set_property("width", &format!("{}px", rect.width()));
     let _ = style.set_property("height", &format!("{}px", rect.height()));
     color_input.set_class_name("hidden-color active");
