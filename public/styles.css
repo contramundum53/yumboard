@@ -452,3 +452,11 @@ body {
     right: 16px;
   }
 }
+
+@supports (-webkit-touch-callout: none) {
+  .toolbar {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+}
