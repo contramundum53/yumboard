@@ -60,6 +60,33 @@ fn sync_tool_ui(
     set_canvas_mode(&state.canvas, &state.mode, dragging);
 }
 
+fn hide_color_input(color_input: &HtmlInputElement) {
+    color_input.set_class_name("hidden-color");
+}
+
+fn show_color_input(
+    palette_el: &HtmlElement,
+    color_input: &HtmlInputElement,
+    selected: Option<usize>,
+) {
+    let Some(index) = selected else {
+        hide_color_input(color_input);
+        return;
+    };
+    let selector = format!("[data-index=\"{index}\"]");
+    let Ok(Some(node)) = palette_el.query_selector(&selector) else {
+        hide_color_input(color_input);
+        return;
+    };
+    let rect = node.get_bounding_client_rect();
+    let style = color_input.style();
+    let _ = style.set_property("left", &format!("{}px", rect.left()));
+    let _ = style.set_property("top", &format!("{}px", rect.top()));
+    let _ = style.set_property("width", &format!("{}px", rect.width()));
+    let _ = style.set_property("height", &format!("{}px", rect.height()));
+    color_input.set_class_name("hidden-color active");
+}
+
 fn take_loading_previous(state: &mut State) -> Option<Mode> {
     let placeholder = Mode::Pan(PanMode::Idle);
     match std::mem::replace(&mut state.mode, placeholder) {
@@ -165,6 +192,7 @@ pub fn run() -> Result<(), JsValue> {
             }
         }
         render_palette(&document, &palette_el, &state.palette, selected);
+        show_color_input(&palette_el, &color_input, selected);
     }
 
     let ws_url = websocket_url(&window)?;
@@ -334,6 +362,7 @@ pub fn run() -> Result<(), JsValue> {
         let pan_button_cb = pan_button.clone();
         let lasso_button_cb = lasso_button.clone();
         let palette_el_cb = palette_el.clone();
+        let color_input_cb = color_input.clone();
         let document = document.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = tool_state.borrow_mut();
@@ -354,6 +383,7 @@ pub fn run() -> Result<(), JsValue> {
                 &state.palette,
                 palette_selected(&state.mode),
             );
+            hide_color_input(&color_input_cb);
         });
         eraser_button
             .add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
@@ -366,6 +396,7 @@ pub fn run() -> Result<(), JsValue> {
         let pan_button_cb = pan_button.clone();
         let lasso_button_cb = lasso_button.clone();
         let palette_el_cb = palette_el.clone();
+        let color_input_cb = color_input.clone();
         let document = document.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = tool_state.borrow_mut();
@@ -389,6 +420,7 @@ pub fn run() -> Result<(), JsValue> {
                 &state.palette,
                 palette_selected(&state.mode),
             );
+            hide_color_input(&color_input_cb);
         });
         lasso_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
@@ -400,6 +432,7 @@ pub fn run() -> Result<(), JsValue> {
         let pan_button_cb = pan_button.clone();
         let lasso_button_cb = lasso_button.clone();
         let palette_el_cb = palette_el.clone();
+        let color_input_cb = color_input.clone();
         let document = document.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = tool_state.borrow_mut();
@@ -420,6 +453,7 @@ pub fn run() -> Result<(), JsValue> {
                 &state.palette,
                 palette_selected(&state.mode),
             );
+            hide_color_input(&color_input_cb);
         });
         pan_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
@@ -483,6 +517,7 @@ pub fn run() -> Result<(), JsValue> {
                         &state.palette,
                         Some(palette_selected),
                     );
+                    show_color_input(&palette_el_cb, &color_input, Some(palette_selected));
                     color_input.click();
                 }
                 PaletteAction::Select(index) => {
@@ -505,6 +540,7 @@ pub fn run() -> Result<(), JsValue> {
                         false,
                     );
                     render_palette(&document, &palette_el_cb, &state.palette, Some(index));
+                    show_color_input(&palette_el_cb, &color_input, Some(index));
                     if already_selected {
                         color_input.click();
                     }
@@ -538,6 +574,11 @@ pub fn run() -> Result<(), JsValue> {
                 &document,
                 &palette_el_cb,
                 &state.palette,
+                palette_selected(&state.mode),
+            );
+            show_color_input(
+                &palette_el_cb,
+                &color_input_cb,
                 palette_selected(&state.mode),
             );
         });

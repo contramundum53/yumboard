@@ -103,11 +103,22 @@ body {
 }
 
 .hidden-color {
-  position: absolute;
-  left: -9999px;
-  width: 1px;
-  height: 1px;
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 28px;
+  height: 28px;
   opacity: 0;
+  pointer-events: none;
+  border: none;
+  padding: 0;
+  background: none;
+  z-index: 10;
+  border-radius: 8px;
+}
+
+.hidden-color.active {
+  opacity: 1;
   pointer-events: auto;
 }
 
