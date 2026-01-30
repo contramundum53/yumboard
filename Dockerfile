@@ -11,7 +11,7 @@ COPY shared/src shared/src
 COPY public public
 
 RUN cargo install wasm-pack
-RUN wasm-pack build client --target web --out-dir ../public/pkg
+RUN wasm-pack build --release client --target web --out-dir ../public/pkg
 RUN cargo build --release -p yumboard_server
 
 FROM debian:bookworm-slim
@@ -25,4 +25,4 @@ COPY --from=builder /app/public /app/public
 ENV PORT=3000
 EXPOSE 3000
 
-CMD ["/app/yumboard_server", "--public-dir", "/app/public", "--session-dir", "/data/sessions"]
+CMD ["/app/yumboard_server"]
