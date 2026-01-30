@@ -28,6 +28,9 @@ body {
     radial-gradient(circle at 78% 78%, rgba(228, 107, 73, 0.18), transparent 58%),
     linear-gradient(130deg, #f7f2e9, #e8eff3);
   overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
 }
 
 #board {
