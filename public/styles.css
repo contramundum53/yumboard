@@ -483,7 +483,8 @@ body {
   }
 
   .range-value {
-    margin-top: 6px;
+    margin-top: 45px;
+    margin-bottom: -45px;
   }
 
   .range-control::before {
