@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use axum::http::header::{CACHE_CONTROL, EXPIRES, PRAGMA};
 use axum::http::HeaderValue;
-use axum::routing::get;
+use axum::routing::{any, get};
 use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
 use clap::Parser;
@@ -129,7 +129,7 @@ async fn main() {
     let app = Router::new()
         .route("/", get(root_handler))
         .route("/s/:session_id", get(session_handler))
-        .route("/ws/:session_id", get(ws_handler))
+        .route("/ws/:session_id", any(ws_handler))
         .fallback_service(ServeDir::new(public_dir).append_index_html_on_directories(true))
         .layer(SetResponseHeaderLayer::if_not_present(
             CACHE_CONTROL,

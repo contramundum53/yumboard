@@ -1,13 +1,12 @@
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, Query, State};
+use axum::extract::{FromRequestParts, Path, State};
 use axum::http::header::{ORIGIN, USER_AGENT};
-use axum::http::HeaderMap;
+use axum::http::Method;
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Redirect};
 use futures_util::{SinkExt, StreamExt};
-use std::collections::HashMap;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 use yumboard_shared::{ClientMessage, ServerMessage};
@@ -40,16 +39,32 @@ pub async fn session_handler(
 
 pub async fn ws_handler(
     Path(session_id): Path<String>,
-    ws: WebSocketUpgrade,
     State(state): State<AppState>,
-    headers: HeaderMap,
-    Query(query): Query<HashMap<String, String>>,
+    request: axum::extract::Request,
 ) -> impl IntoResponse {
     let session_id = match normalize_session_id(&session_id) {
         Some(id) => id,
         None => return StatusCode::NOT_FOUND.into_response(),
     };
-    let client_id = query.get("client").cloned();
+
+    let (mut parts, _) = request.into_parts();
+    let method = parts.method.clone();
+    let uri = parts.uri.clone();
+    let version = parts.version;
+    let headers = parts.headers.clone();
+
+    let client_id = uri.query().and_then(|query| {
+        query.split('&').find_map(|pair| {
+            let mut parts = pair.splitn(2, '=');
+            let key = parts.next()?;
+            let value = parts.next().unwrap_or_default();
+            if key == "client" && !value.is_empty() {
+                Some(value.to_string())
+            } else {
+                None
+            }
+        })
+    });
     let user_agent = headers
         .get(USER_AGENT)
         .and_then(|value| value.to_str().ok())
@@ -58,10 +73,28 @@ pub async fn ws_handler(
         .get(ORIGIN)
         .and_then(|value| value.to_str().ok())
         .unwrap_or("-");
+
     eprintln!(
-        "WS upgrade requested session={session_id} client={client_id:?} ua={user_agent:?} origin={origin:?}"
+        "WS request session={session_id} client={client_id:?} method={method:?} version={version:?} uri={uri} ua={user_agent:?} origin={origin:?}",
     );
-    ws.on_upgrade(move |socket| handle_socket(socket, state, session_id, client_id))
+
+    if method != Method::GET {
+        eprintln!("WS reject session={session_id} client={client_id:?} reason=method_not_allowed method={method:?}");
+        return StatusCode::METHOD_NOT_ALLOWED.into_response();
+    }
+
+    match WebSocketUpgrade::from_request_parts(&mut parts, &state).await {
+        Ok(ws) => {
+            eprintln!("WS upgrade ok session={session_id} client={client_id:?}");
+            ws.on_upgrade(move |socket| handle_socket(socket, state, session_id, client_id))
+        }
+        Err(rejection) => {
+            eprintln!(
+                "WS upgrade rejected session={session_id} client={client_id:?} method={method:?} version={version:?} uri={uri} error={rejection:?}"
+            );
+            rejection.into_response()
+        }
+    }
 }
 
 async fn handle_socket(
