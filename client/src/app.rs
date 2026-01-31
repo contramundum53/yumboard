@@ -58,6 +58,14 @@ fn window_is_secure_context(window: &web_sys::Window) -> Option<bool> {
         .as_bool()
 }
 
+fn set_debug_mark(window: &web_sys::Window, mark: &str) {
+    let _ = Reflect::set(
+        window.as_ref(),
+        &JsValue::from_str("__yumboard_last_mark"),
+        &JsValue::from_str(mark),
+    );
+}
+
 fn server_message_kind(message: &ServerMessage) -> &'static str {
     match message {
         ServerMessage::Sync { .. } => "sync",
@@ -238,6 +246,7 @@ pub fn run() -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
 
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("Missing window"))?;
+    set_debug_mark(&window, "run:start");
     let document = window
         .document()
         .ok_or_else(|| JsValue::from_str("Missing document"))?;
@@ -261,6 +270,8 @@ pub fn run() -> Result<(), JsValue> {
             &"Tip: keep this session URL but add `?debug=1` to enable logs.".into(),
         );
     }
+
+    set_debug_mark(&window, "run:dom_ready");
 
     let canvas: HtmlCanvasElement = get_element(&document, "board")?;
     let ctx = canvas
@@ -335,14 +346,18 @@ pub fn run() -> Result<(), JsValue> {
         show_color_input(&palette_el, &color_input, selected);
     }
 
+    set_debug_mark(&window, "ws:url");
     let ws_url = websocket_url(&window)?;
+    set_debug_mark(&window, "ws:connecting");
     web_sys::console::log_1(&format!("WS connecting url={ws_url}").into());
     let socket = Rc::new(WebSocket::new(&ws_url)?);
+    set_debug_mark(&window, "ws:created");
     web_sys::console::log_1(&format!("WS created ready_state={}", socket.ready_state()).into());
     let pending_points = Rc::new(RefCell::new(HashMap::<StrokeId, Vec<Point>>::new()));
     let flush_scheduled = Rc::new(Cell::new(false));
     let active_draw_pointer: Rc<Cell<Option<i32>>> = Rc::new(Cell::new(None));
     let active_draw_timestamp = Rc::new(Cell::new(0.0));
+    let pointer_move_marked = Rc::new(Cell::new(false));
     let schedule_flush: Rc<dyn Fn()> = Rc::new({
         let pending_points = pending_points.clone();
         let flush_scheduled = flush_scheduled.clone();
@@ -384,7 +399,9 @@ pub fn run() -> Result<(), JsValue> {
         let status_text = status_text.clone();
         let socket_cb = socket.clone();
         let ws_url = ws_url.clone();
+        let window_cb = window.clone();
         let onopen = Closure::<dyn FnMut(Event)>::new(move |_| {
+            set_debug_mark(&window_cb, "ws:open");
             web_sys::console::log_1(
                 &format!(
                     "WS open url={ws_url} ready_state={}",
@@ -403,7 +420,9 @@ pub fn run() -> Result<(), JsValue> {
         let status_text = status_text.clone();
         let socket_cb = socket.clone();
         let ws_url = ws_url.clone();
+        let window_cb = window.clone();
         let onclose = Closure::<dyn FnMut(CloseEvent)>::new(move |event: CloseEvent| {
+            set_debug_mark(&window_cb, "ws:close");
             web_sys::console::warn_1(
                 &format!(
                     "WS close url={ws_url} code={} was_clean={} reason={:?} ready_state={}",
@@ -425,7 +444,9 @@ pub fn run() -> Result<(), JsValue> {
         let status_text = status_text.clone();
         let socket_cb = socket.clone();
         let ws_url = ws_url.clone();
+        let window_cb = window.clone();
         let onerror = Closure::<dyn FnMut(Event)>::new(move |_| {
+            set_debug_mark(&window_cb, "ws:error");
             web_sys::console::error_1(
                 &format!(
                     "WS error url={ws_url} ready_state={} buffered_amount={}",
@@ -489,6 +510,7 @@ pub fn run() -> Result<(), JsValue> {
         let message_state = state.clone();
         let message_count = Rc::new(Cell::new(0u32));
         let message_count_cb = message_count.clone();
+        let window_cb = window.clone();
         let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
             let text = match event.data().as_string() {
                 Some(text) => text,
@@ -526,6 +548,7 @@ pub fn run() -> Result<(), JsValue> {
             let mut state = message_state.borrow_mut();
             match message {
                 ServerMessage::Sync { strokes } => {
+                    set_debug_mark(&window_cb, "ws:message:sync");
                     if debug {
                         web_sys::console::log_1(
                             &format!("WS sync strokes={}", strokes.len()).into(),
@@ -539,34 +562,43 @@ pub fn run() -> Result<(), JsValue> {
                     size,
                     point,
                 } => {
+                    set_debug_mark(&window_cb, "ws:message:stroke:start");
                     start_stroke(&mut state, id, color, size, point);
                 }
                 ServerMessage::StrokeMove { id, point } => {
+                    set_debug_mark(&window_cb, "ws:message:stroke:move");
                     let _ = move_stroke(&mut state, &id, point);
                 }
                 ServerMessage::StrokePoints { id, points } => {
+                    set_debug_mark(&window_cb, "ws:message:stroke:points");
                     for point in points {
                         let _ = move_stroke(&mut state, &id, point);
                     }
                 }
                 ServerMessage::StrokeEnd { id } => {
+                    set_debug_mark(&window_cb, "ws:message:stroke:end");
                     end_stroke(&mut state, &id);
                 }
                 ServerMessage::Clear => {
+                    set_debug_mark(&window_cb, "ws:message:clear");
                     clear_board(&mut state);
                 }
                 ServerMessage::StrokeRemove { id } => {
+                    set_debug_mark(&window_cb, "ws:message:stroke:remove");
                     remove_stroke(&mut state, &id);
                     redraw(&mut state);
                 }
                 ServerMessage::StrokeRestore { stroke } => {
+                    set_debug_mark(&window_cb, "ws:message:stroke:restore");
                     restore_stroke(&mut state, stroke);
                 }
                 ServerMessage::StrokeReplace { stroke } => {
+                    set_debug_mark(&window_cb, "ws:message:stroke:replace");
                     replace_stroke_local(&mut state, stroke);
                     redraw(&mut state);
                 }
                 ServerMessage::TransformUpdate { ids, op } => {
+                    set_debug_mark(&window_cb, "ws:message:transform:update");
                     if debug {
                         web_sys::console::log_1(
                             &format!("WS transform:update ids={} op={op:?}", ids.len()).into(),
@@ -1097,7 +1129,9 @@ pub fn run() -> Result<(), JsValue> {
         let down_size = size_input.clone();
         let down_active_draw_pointer = active_draw_pointer.clone();
         let down_active_draw_timestamp = active_draw_timestamp.clone();
+        let down_window = window.clone();
         let ondown = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
+            set_debug_mark(&down_window, "pointer:down");
             if event.button() != 0 {
                 return;
             }
@@ -1349,7 +1383,12 @@ pub fn run() -> Result<(), JsValue> {
         let move_schedule_flush = schedule_flush.clone();
         let move_active_draw_pointer = active_draw_pointer.clone();
         let move_active_draw_timestamp = active_draw_timestamp.clone();
+        let move_window = window.clone();
+        let move_marked = pointer_move_marked.clone();
         let onmove = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
+            if !move_marked.replace(true) {
+                set_debug_mark(&move_window, "pointer:move");
+            }
             for event in coalesced_pointer_events(&event) {
                 if is_touch_event(&event) {
                     let mut state = move_state.borrow_mut();
@@ -1635,7 +1674,11 @@ pub fn run() -> Result<(), JsValue> {
         let stop_pending_points = pending_points.clone();
         let stop_active_draw_pointer = active_draw_pointer.clone();
         let stop_active_draw_timestamp = active_draw_timestamp.clone();
+        let stop_window = window.clone();
+        let stop_marked = pointer_move_marked.clone();
         let onstop = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
+            set_debug_mark(&stop_window, "pointer:stop");
+            stop_marked.set(false);
             let mut state = stop_state.borrow_mut();
             if is_touch_event(&event) {
                 state.touch_points.remove(&event.pointer_id());
