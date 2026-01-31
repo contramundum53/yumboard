@@ -415,19 +415,13 @@ pub fn run() -> Result<(), JsValue> {
 
     set_debug_mark(&window, "ws:url");
     let base_ws_url = websocket_url(&window)?;
-    let ws_client_id = debug.then_some(make_ws_client_id());
-    if let Some(ws_client_id) = &ws_client_id {
-        let _ = Reflect::set(
-            window.as_ref(),
-            &JsValue::from_str("__yumboard_ws_client_id"),
-            &JsValue::from_str(ws_client_id),
-        );
-    }
-    let ws_url = if let Some(ws_client_id) = &ws_client_id {
-        append_query_param(&base_ws_url, "client", ws_client_id)
-    } else {
-        base_ws_url
-    };
+    let ws_client_id = make_ws_client_id();
+    let _ = Reflect::set(
+        window.as_ref(),
+        &JsValue::from_str("__yumboard_ws_client_id"),
+        &JsValue::from_str(&ws_client_id),
+    );
+    let ws_url = append_query_param(&base_ws_url, "client", &ws_client_id);
     set_debug_mark(&window, "ws:connecting");
     web_sys::console::log_1(&format!("WS connecting url={ws_url}").into());
     let socket = Rc::new(WebSocket::new(&ws_url)?);
