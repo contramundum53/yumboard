@@ -195,6 +195,8 @@ pub fn run() -> Result<(), JsValue> {
     let eraser_button: HtmlButtonElement = get_element(&document, "eraser")?;
     let pan_button: HtmlButtonElement = get_element(&document, "pan")?;
     let home_button: HtmlButtonElement = get_element(&document, "home")?;
+    let undo_button: HtmlButtonElement = get_element(&document, "undo")?;
+    let redo_button: HtmlButtonElement = get_element(&document, "redo")?;
     let status_el = document
         .get_element_by_id("status")
         .ok_or_else(|| JsValue::from_str("Missing status element"))?;
@@ -685,6 +687,24 @@ pub fn run() -> Result<(), JsValue> {
             send_message(&clear_socket, &ClientMessage::Clear);
         });
         clear_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
+        onclick.forget();
+    }
+
+    {
+        let undo_socket = socket.clone();
+        let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
+            send_message(&undo_socket, &ClientMessage::Undo);
+        });
+        undo_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
+        onclick.forget();
+    }
+
+    {
+        let redo_socket = socket.clone();
+        let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
+            send_message(&redo_socket, &ClientMessage::Redo);
+        });
+        redo_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
     }
 
