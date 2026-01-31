@@ -1362,7 +1362,7 @@ pub fn run() -> Result<(), JsValue> {
                             return;
                         }
                     };
-                    let id = StrokeId::new(make_id());
+                    let id = make_id();
                     let color = down_color.value();
                     let size = sanitize_size(down_size.value_as_number() as f32);
 

@@ -20,9 +20,6 @@ pub fn apply_client_message(
             size,
             point,
         } => {
-            if id.is_empty() || id.len() > 64 {
-                return None;
-            }
             let point = normalize_point(point)?;
             let color = sanitize_color(color);
             let size = sanitize_size(size);
@@ -56,9 +53,6 @@ pub fn apply_client_message(
             ))
         }
         ClientMessage::StrokeMove { id, point } => {
-            if id.is_empty() || id.len() > 64 {
-                return None;
-            }
             let point = normalize_point(point)?;
             if !session.active_ids.contains(&id) {
                 return None;
@@ -78,9 +72,6 @@ pub fn apply_client_message(
             None
         }
         ClientMessage::StrokePoints { id, points } => {
-            if id.is_empty() || id.len() > 64 {
-                return None;
-            }
             if points.is_empty() {
                 return None;
             }
@@ -124,9 +115,6 @@ pub fn apply_client_message(
             ))
         }
         ClientMessage::StrokeEnd { id } => {
-            if id.is_empty() || id.len() > 64 {
-                return None;
-            }
             session.active_ids.remove(&id);
             if let Some(owner) = session.owners.get(&id) {
                 if *owner == sender {
@@ -306,10 +294,6 @@ pub fn apply_client_message(
             }
         }
         ClientMessage::Erase { id } => {
-            if id.is_empty() || id.len() > 64 {
-                return None;
-            }
-
             let id_ref = &id;
             let removed = if let Some(index) = session.strokes.iter().position(|s| &s.id == id_ref)
             {
@@ -410,9 +394,6 @@ pub fn apply_client_message(
             }
             let mut removed = Vec::new();
             for id in ids {
-                if id.is_empty() || id.len() > 64 {
-                    continue;
-                }
                 let stroke = remove_stroke_full(session, &id);
                 if let Some(stroke) = stroke {
                     removed.push(stroke);
@@ -525,9 +506,6 @@ fn sanitize_size(size: f32) -> f32 {
 }
 
 fn sanitize_stroke(mut stroke: Stroke) -> Option<Stroke> {
-    if stroke.id.is_empty() || stroke.id.len() > 64 {
-        return None;
-    }
     stroke.color = sanitize_color(stroke.color);
     stroke.size = sanitize_size(stroke.size);
     stroke.points = stroke
@@ -545,9 +523,6 @@ fn sanitize_ids(ids: Vec<StrokeId>) -> Vec<StrokeId> {
     let mut unique = HashSet::new();
     let mut result = Vec::new();
     for id in ids {
-        if id.is_empty() || id.len() > 64 {
-            continue;
-        }
         if unique.insert(id.clone()) {
             result.push(id);
         }

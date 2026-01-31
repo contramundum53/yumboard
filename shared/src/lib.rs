@@ -1,29 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[serde(transparent)]
-pub struct StrokeId(String);
+pub struct StrokeId([u64; 2]);
 
 impl StrokeId {
-    pub fn new(value: String) -> Self {
-        Self(value)
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-}
-
-impl From<String> for StrokeId {
-    fn from(value: String) -> Self {
+    pub fn new(value: [u64; 2]) -> Self {
         Self(value)
     }
 }
