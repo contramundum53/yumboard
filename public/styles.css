@@ -476,16 +476,38 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    height: 160px;
-    width: 34px;
+    width: auto;
+    height: auto;
+  }
+
+  .range-control::before {
+    display: none;
   }
 
   #size {
+    -webkit-appearance: auto;
+    appearance: auto;
     writing-mode: horizontal-tb;
-    transform: rotate(-90deg);
-    transform-origin: center;
-    width: 130px;
-    height: 34px;
+    direction: ltr;
+    transform: none;
+    width: 140px;
+    height: 28px;
+    margin: 0;
+  }
+
+  #size::-webkit-slider-runnable-track {
+    background: initial;
+    height: auto;
+  }
+
+  #size::-webkit-slider-thumb {
+    -webkit-appearance: auto;
+    width: auto;
+    height: auto;
+    border: none;
+    border-radius: 0;
+    background: initial;
+    box-shadow: none;
     margin: 0;
   }
 }
