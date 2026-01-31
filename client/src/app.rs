@@ -1026,7 +1026,7 @@ pub fn run() -> Result<(), JsValue> {
                         let world_point =
                             match event_to_point(&move_canvas, &event, pan_x, pan_y, zoom) {
                                 Some(point) => point,
-                                None => return,
+                                None => continue,
                             };
                         match &mut select.mode {
                             SelectMode::Lasso { points } => {
@@ -1119,7 +1119,7 @@ pub fn run() -> Result<(), JsValue> {
                     Mode::Erase(EraseMode::Active { .. }) => {
                         let point = match event_to_point(&move_canvas, &event, pan_x, pan_y, zoom) {
                             Some(point) => point,
-                            None => return,
+                            None => continue,
                         };
                         let removed_ids = erase_hits_at_point(&mut state, point);
                         for id in removed_ids {
@@ -1141,15 +1141,15 @@ pub fn run() -> Result<(), JsValue> {
                     Mode::Draw(draw) => {
                         let id = match &draw.mode {
                             DrawMode::Drawing { id } => id.clone(),
-                            _ => return,
+                            _ => continue,
                         };
                         let point = match event_to_point(&move_canvas, &event, pan_x, pan_y, zoom) {
                             Some(point) => point,
-                            None => return,
+                            None => continue,
                         };
                         if let Some(last_point) = last_point_for_id(&state.strokes, &id) {
                             if last_point == point {
-                                return;
+                                continue;
                             }
                         }
                         move_stroke(&mut state, &id, point);
