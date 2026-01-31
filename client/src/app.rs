@@ -934,6 +934,17 @@ pub fn run() -> Result<(), JsValue> {
                     let _ = down_canvas.set_pointer_capture(event.pointer_id());
                     return;
                 }
+                if state.touch_points.len() == 1 {
+                    state.mode = Mode::Pan(PanMode::Active {
+                        start_x: event.client_x() as f64,
+                        start_y: event.client_y() as f64,
+                        origin_x: state.pan_x,
+                        origin_y: state.pan_y,
+                    });
+                    set_canvas_mode(&state.canvas, &state.mode, true);
+                    let _ = down_canvas.set_pointer_capture(event.pointer_id());
+                    return;
+                }
             }
             let rect = down_canvas.get_bounding_client_rect();
             let screen_x = event.client_x() as f64 - rect.left();
