@@ -461,6 +461,8 @@ pub fn run() -> Result<(), JsValue> {
         onerror.forget();
     }
 
+    set_debug_mark(&window, "ws:handlers_set");
+
     {
         let socket = socket.clone();
         let ws_url = ws_url.clone();
@@ -505,6 +507,8 @@ pub fn run() -> Result<(), JsValue> {
         )?;
         onbeforeunload.forget();
     }
+
+    set_debug_mark(&window, "ws:lifecycle_listeners_set");
 
     {
         let message_state = state.clone();
@@ -612,6 +616,8 @@ pub fn run() -> Result<(), JsValue> {
         socket.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
         onmessage.forget();
     }
+
+    set_debug_mark(&window, "ws:onmessage_set");
 
     {
         let resize_state = state.clone();
@@ -1819,5 +1825,6 @@ pub fn run() -> Result<(), JsValue> {
         onwheel.forget();
     }
 
+    set_debug_mark(&window, "run:ready");
     Ok(())
 }
