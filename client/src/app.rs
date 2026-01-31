@@ -84,6 +84,17 @@ fn set_debug_mark(window: &web_sys::Window, mark: &str) {
     );
 }
 
+fn make_ws_client_id() -> String {
+    let now = js_sys::Date::now() as u64;
+    let rand = (js_sys::Math::random() * (u32::MAX as f64 + 1.0)) as u32;
+    format!("{now:x}-{rand:08x}")
+}
+
+fn append_query_param(url: &str, key: &str, value: &str) -> String {
+    let sep = if url.contains('?') { "&" } else { "?" };
+    format!("{url}{sep}{key}={value}")
+}
+
 fn server_message_kind(message: &ServerMessage) -> &'static str {
     match message {
         ServerMessage::Sync { .. } => "sync",
@@ -403,7 +414,20 @@ pub fn run() -> Result<(), JsValue> {
     }
 
     set_debug_mark(&window, "ws:url");
-    let ws_url = websocket_url(&window)?;
+    let base_ws_url = websocket_url(&window)?;
+    let ws_client_id = debug.then_some(make_ws_client_id());
+    if let Some(ws_client_id) = &ws_client_id {
+        let _ = Reflect::set(
+            window.as_ref(),
+            &JsValue::from_str("__yumboard_ws_client_id"),
+            &JsValue::from_str(ws_client_id),
+        );
+    }
+    let ws_url = if let Some(ws_client_id) = &ws_client_id {
+        append_query_param(&base_ws_url, "client", ws_client_id)
+    } else {
+        base_ws_url
+    };
     set_debug_mark(&window, "ws:connecting");
     web_sys::console::log_1(&format!("WS connecting url={ws_url}").into());
     let socket = Rc::new(WebSocket::new(&ws_url)?);
@@ -415,12 +439,15 @@ pub fn run() -> Result<(), JsValue> {
     set_debug_mark(&window, "ws:created");
     web_sys::console::log_1(&format!("WS created ready_state={}", socket.ready_state()).into());
 
+    let ws_open_reported = Rc::new(Cell::new(false));
+
     {
         let status_el = status_el.clone();
         let status_text = status_text.clone();
         let socket_cb = socket.clone();
         let ws_url = ws_url.clone();
         let window_cb = window.clone();
+        let ws_open_reported = ws_open_reported.clone();
         let onopen = Closure::<dyn FnMut(Event)>::new(move |_| {
             set_debug_mark(&window_cb, "ws:open");
             web_sys::console::log_1(
@@ -430,6 +457,7 @@ pub fn run() -> Result<(), JsValue> {
                 )
                 .into(),
             );
+            ws_open_reported.set(true);
             set_status(&status_el, &status_text, "open", "Live connection");
         });
         socket.set_onopen(Some(onopen.as_ref().unchecked_ref()));
@@ -443,6 +471,7 @@ pub fn run() -> Result<(), JsValue> {
         let ws_url = ws_url.clone();
         let document_cb = document.clone();
         let window_cb = window.clone();
+        let ws_open_reported = ws_open_reported.clone();
         let onclose = Closure::<dyn FnMut(CloseEvent)>::new(move |event: CloseEvent| {
             set_debug_mark(&window_cb, "ws:close");
             let hidden = document_hidden(&document_cb);
@@ -457,6 +486,7 @@ pub fn run() -> Result<(), JsValue> {
                 )
                 .into(),
             );
+            ws_open_reported.set(false);
             set_status(&status_el, &status_text, "closed", "Offline");
         });
         socket.set_onclose(Some(onclose.as_ref().unchecked_ref()));
@@ -469,6 +499,7 @@ pub fn run() -> Result<(), JsValue> {
         let socket_cb = socket.clone();
         let ws_url = ws_url.clone();
         let window_cb = window.clone();
+        let ws_open_reported = ws_open_reported.clone();
         let onerror = Closure::<dyn FnMut(Event)>::new(move |_| {
             set_debug_mark(&window_cb, "ws:error");
             web_sys::console::error_1(
@@ -479,6 +510,7 @@ pub fn run() -> Result<(), JsValue> {
                 )
                 .into(),
             );
+            ws_open_reported.set(false);
             set_status(&status_el, &status_text, "closed", "Connection error");
         });
         socket.set_onerror(Some(onerror.as_ref().unchecked_ref()));
@@ -490,10 +522,20 @@ pub fn run() -> Result<(), JsValue> {
     {
         let socket = socket.clone();
         let ws_url = ws_url.clone();
+        let ws_open_reported = ws_open_reported.clone();
+        let document_cb = document.clone();
         let ontimeout = Closure::<dyn FnMut()>::new(move || {
             if socket.ready_state() == WebSocket::CONNECTING {
+                let hidden = document_hidden(&document_cb);
+                let visibility = document_visibility_state(&document_cb);
                 web_sys::console::warn_1(
-                    &format!("WS still CONNECTING after 6s url={ws_url}").into(),
+                    &format!(
+                        "WS still CONNECTING after 6s url={ws_url} ready_state={} buffered_amount={} open_reported={} hidden={hidden:?} visibility_state={visibility:?}",
+                        socket.ready_state(),
+                        socket.buffered_amount(),
+                        ws_open_reported.get(),
+                    )
+                    .into(),
                 );
             }
         });
@@ -552,7 +594,22 @@ pub fn run() -> Result<(), JsValue> {
         let message_count = Rc::new(Cell::new(0u32));
         let message_count_cb = message_count.clone();
         let window_cb = window.clone();
+        let status_el = status_el.clone();
+        let status_text = status_text.clone();
+        let ws_open_reported = ws_open_reported.clone();
+        let ws_url = ws_url.clone();
         let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
+            if !ws_open_reported.get() {
+                ws_open_reported.set(true);
+                if debug {
+                    set_debug_mark(&window_cb, "ws:open:via_message");
+                    web_sys::console::warn_1(
+                        &format!("WS message arrived before onopen url={ws_url}").into(),
+                    );
+                }
+                set_status(&status_el, &status_text, "open", "Live connection");
+            }
+
             let message = if let Ok(buffer) = event.data().dyn_into::<js_sys::ArrayBuffer>() {
                 let bytes = Uint8Array::new(&buffer).to_vec();
                 match bincode::serde::decode_from_slice::<ServerMessage, _>(

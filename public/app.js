@@ -25,6 +25,7 @@ setTimeout(maybeInitEruda, 1000);
 
 window.addEventListener("error", (event) => {
   const yumboardMark = window.__yumboard_last_mark || null;
+  const yumboardWsClientId = window.__yumboard_ws_client_id || null;
   console.error(`window.error mark=${yumboardMark || "null"}`, {
     message: event.message,
     filename: event.filename,
@@ -32,14 +33,17 @@ window.addEventListener("error", (event) => {
     colno: event.colno,
     error: event.error,
     yumboardMark,
+    yumboardWsClientId,
   });
 });
 
 window.addEventListener("unhandledrejection", (event) => {
   const yumboardMark = window.__yumboard_last_mark || null;
+  const yumboardWsClientId = window.__yumboard_ws_client_id || null;
   console.error(`window.unhandledrejection mark=${yumboardMark || "null"}`, {
     reason: event.reason,
     yumboardMark,
+    yumboardWsClientId,
   });
 });
 
