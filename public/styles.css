@@ -488,7 +488,7 @@ body {
   }
 
   .range-control::before {
-    display: none;
+    display: block;
   }
 
   #size {
