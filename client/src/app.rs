@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 
+use js_sys::{Function, Reflect};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
@@ -101,11 +102,27 @@ fn show_color_input(
 }
 
 fn coalesced_pointer_events(event: &PointerEvent) -> Vec<PointerEvent> {
-    let events = event.get_coalesced_events();
+    let get_coalesced_events =
+        Reflect::get(event.as_ref(), &JsValue::from_str("getCoalescedEvents"))
+            .ok()
+            .and_then(|value| value.dyn_into::<Function>().ok());
+
+    let Some(get_coalesced_events) = get_coalesced_events else {
+        return vec![event.clone()];
+    };
+
+    let Ok(events) = get_coalesced_events
+        .call0(event.as_ref())
+        .and_then(|value| value.dyn_into::<js_sys::Array>())
+    else {
+        return vec![event.clone()];
+    };
+
     if events.length() == 0 {
         return vec![event.clone()];
     }
-    let mut out = Vec::with_capacity(events.length() as usize);
+
+    let mut out = Vec::with_capacity(events.length() as usize + 1);
     for index in 0..events.length() {
         if let Ok(event) = events.get(index).dyn_into::<PointerEvent>() {
             out.push(event);
