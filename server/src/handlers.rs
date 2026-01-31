@@ -15,6 +15,10 @@ use crate::logic::{apply_client_message, broadcast_all, broadcast_except};
 use crate::sessions::{get_or_create_session, new_session_id, normalize_session_id, save_session};
 use crate::state::AppState;
 
+pub async fn ping_handler() -> impl IntoResponse {
+    StatusCode::NO_CONTENT
+}
+
 pub async fn root_handler(State(state): State<AppState>) -> impl IntoResponse {
     let session_id = new_session_id();
     let _ = get_or_create_session(&state, &session_id).await;

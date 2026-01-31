@@ -16,7 +16,7 @@ mod logic;
 mod sessions;
 mod state;
 
-use crate::handlers::{root_handler, session_handler, ws_handler};
+use crate::handlers::{ping_handler, root_handler, session_handler, ws_handler};
 use crate::sessions::save_session;
 use crate::state::AppState;
 
@@ -131,6 +131,7 @@ async fn main() {
     let backup_state2 = state.clone();
 
     let app = Router::new()
+        .route("/ping", get(ping_handler))
         .route("/", get(root_handler))
         .route("/s/:session_id", get(session_handler))
         .route("/ws/:session_id", any(ws_handler))

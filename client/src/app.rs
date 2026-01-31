@@ -101,15 +101,29 @@ fn append_query_param(url: &str, key: &str, value: &str) -> String {
     format!("{url}{sep}{key}={value}")
 }
 
-fn http_probe_url_from_ws_url(ws_url: &str) -> Option<String> {
-    let base = if let Some(rest) = ws_url.strip_prefix("wss://") {
-        format!("https://{rest}")
-    } else if let Some(rest) = ws_url.strip_prefix("ws://") {
-        format!("http://{rest}")
-    } else {
-        return None;
-    };
-    Some(append_query_param(&base, "probe", "1"))
+fn navigator_max_touch_points(window: &web_sys::Window) -> Option<u32> {
+    let navigator = Reflect::get(window.as_ref(), &JsValue::from_str("navigator")).ok()?;
+    Reflect::get(&navigator, &JsValue::from_str("maxTouchPoints"))
+        .ok()?
+        .as_f64()
+        .map(|value| value as u32)
+}
+
+fn should_kick_safari_ws(window: &web_sys::Window) -> bool {
+    let ua = window_user_agent(window).unwrap_or_default();
+    let is_safari = ua.contains("Safari")
+        && !ua.contains("Chrome")
+        && !ua.contains("CriOS")
+        && !ua.contains("FxiOS")
+        && !ua.contains("Edg")
+        && !ua.contains("OPR");
+    let touch = navigator_max_touch_points(window).unwrap_or(0) > 1;
+    is_safari && touch
+}
+
+fn ping_url(ws_client_id: &str) -> String {
+    let now = js_sys::Date::now() as u64;
+    format!("/ping?client={ws_client_id}&t={now}")
 }
 
 fn server_message_kind(message: &ServerMessage) -> &'static str {
@@ -468,6 +482,7 @@ fn start_app() -> Result<(), JsValue> {
         &JsValue::from_str(&ws_client_id),
     );
     let ws_url = append_query_param(&base_ws_url, "client", &ws_client_id);
+    let kick_safari_ws = should_kick_safari_ws(&window);
     set_debug_mark(&window, "ws:connecting");
     web_sys::console::log_1(&format!("WS connecting url={ws_url}").into());
     let socket = Rc::new(WebSocket::new(&ws_url)?);
@@ -559,6 +574,61 @@ fn start_app() -> Result<(), JsValue> {
 
     set_debug_mark(&window, "ws:handlers_set");
 
+    if kick_safari_ws {
+        let socket = socket.clone();
+        let ws_url = ws_url.clone();
+        let window_cb = window.clone();
+        let ws_client_id = ws_client_id.clone();
+        let debug = debug;
+        let onkick = Closure::<dyn FnMut()>::new(move || {
+            if socket.ready_state() != WebSocket::CONNECTING {
+                return;
+            }
+            let ping_url = ping_url(&ws_client_id);
+            if debug {
+                web_sys::console::log_1(
+                    &format!("WS kick fetch start url={ping_url} ws_url={ws_url}").into(),
+                );
+            }
+            let promise = window_cb.fetch_with_str(&ping_url);
+
+            let ping_url_ok = ping_url.clone();
+            let on_ok = Closure::<dyn FnMut(JsValue)>::new(move |value: JsValue| {
+                if !debug {
+                    return;
+                }
+                let status = Reflect::get(&value, &JsValue::from_str("status"))
+                    .ok()
+                    .and_then(|v| v.as_f64());
+                let ok = Reflect::get(&value, &JsValue::from_str("ok"))
+                    .ok()
+                    .and_then(|v| v.as_bool());
+                web_sys::console::log_1(
+                    &format!("WS kick fetch ok url={ping_url_ok} status={status:?} ok={ok:?}")
+                        .into(),
+                );
+            });
+
+            let ping_url_err = ping_url.clone();
+            let on_err = Closure::<dyn FnMut(JsValue)>::new(move |_err: JsValue| {
+                if debug {
+                    web_sys::console::warn_1(
+                        &format!("WS kick fetch error url={ping_url_err}").into(),
+                    );
+                }
+            });
+
+            let _ = promise.then2(&on_ok, &on_err);
+            on_ok.forget();
+            on_err.forget();
+        });
+        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+            onkick.as_ref().unchecked_ref(),
+            0,
+        );
+        onkick.forget();
+    }
+
     {
         let socket = socket.clone();
         let ws_url = ws_url.clone();
@@ -568,6 +638,8 @@ fn start_app() -> Result<(), JsValue> {
         let probe_fired = Rc::new(Cell::new(false));
         let probe_fired_cb = probe_fired.clone();
         let debug = debug;
+        let kick_safari_ws = kick_safari_ws;
+        let ws_client_id = ws_client_id.clone();
         let ontimeout = Closure::<dyn FnMut()>::new(move || {
             if socket.ready_state() == WebSocket::CONNECTING {
                 let hidden = document_hidden(&document_cb);
@@ -582,41 +654,46 @@ fn start_app() -> Result<(), JsValue> {
                     .into(),
                 );
 
-                if debug && !probe_fired_cb.replace(true) {
-                    if let Some(probe_url) = http_probe_url_from_ws_url(&ws_url) {
+                if kick_safari_ws && !probe_fired_cb.replace(true) {
+                    let ping_url = ping_url(&ws_client_id);
+                    if debug {
                         web_sys::console::log_1(
-                            &format!("WS probe fetch start url={probe_url}").into(),
+                            &format!("WS probe fetch start url={ping_url}").into(),
                         );
-                        let promise = window_cb.fetch_with_str(&probe_url);
-
-                        let probe_url_ok = probe_url.clone();
-                        let on_ok = Closure::<dyn FnMut(JsValue)>::new(move |value: JsValue| {
-                            let status = Reflect::get(&value, &JsValue::from_str("status"))
-                                .ok()
-                                .and_then(|v| v.as_f64());
-                            let ok = Reflect::get(&value, &JsValue::from_str("ok"))
-                                .ok()
-                                .and_then(|v| v.as_bool());
-                            web_sys::console::log_1(
-                                &format!(
-                                    "WS probe fetch ok url={probe_url_ok} status={status:?} ok={ok:?}"
-                                )
-                                .into(),
-                            );
-                        });
-
-                        let probe_url_err = probe_url.clone();
-                        let on_err = Closure::<dyn FnMut(JsValue)>::new(move |err: JsValue| {
-                            web_sys::console::error_2(
-                                &format!("WS probe fetch error url={probe_url_err}").into(),
-                                &err,
-                            );
-                        });
-
-                        let _ = promise.then2(&on_ok, &on_err);
-                        on_ok.forget();
-                        on_err.forget();
                     }
+                    let promise = window_cb.fetch_with_str(&ping_url);
+
+                    let ping_url_ok = ping_url.clone();
+                    let on_ok = Closure::<dyn FnMut(JsValue)>::new(move |value: JsValue| {
+                        if !debug {
+                            return;
+                        }
+                        let status = Reflect::get(&value, &JsValue::from_str("status"))
+                            .ok()
+                            .and_then(|v| v.as_f64());
+                        let ok = Reflect::get(&value, &JsValue::from_str("ok"))
+                            .ok()
+                            .and_then(|v| v.as_bool());
+                        web_sys::console::log_1(
+                            &format!(
+                                "WS probe fetch ok url={ping_url_ok} status={status:?} ok={ok:?}"
+                            )
+                            .into(),
+                        );
+                    });
+
+                    let ping_url_err = ping_url.clone();
+                    let on_err = Closure::<dyn FnMut(JsValue)>::new(move |_err: JsValue| {
+                        if debug {
+                            web_sys::console::warn_1(
+                                &format!("WS probe fetch error url={ping_url_err}").into(),
+                            );
+                        }
+                    });
+
+                    let _ = promise.then2(&on_ok, &on_err);
+                    on_ok.forget();
+                    on_err.forget();
                 }
             }
         });
