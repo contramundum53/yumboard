@@ -89,7 +89,7 @@ async fn handle_socket(
 
     let strokes_snapshot = session.read().await.strokes.clone();
     let strokes_len = strokes_snapshot.len();
-    if let Ok(sync_payload) = bincode::serde::encode_to_vec(
+    if let Ok(sync_payload) = bincode::encode_to_vec(
         &ServerMessage::Sync {
             strokes: strokes_snapshot,
         },
@@ -112,9 +112,7 @@ async fn handle_socket(
 
     let send_task = tokio::spawn(async move {
         while let Some(message) = rx.recv().await {
-            if let Ok(payload) =
-                bincode::serde::encode_to_vec(&message, bincode::config::standard())
-            {
+            if let Ok(payload) = bincode::encode_to_vec(&message, bincode::config::standard()) {
                 if socket_sender.send(Message::Binary(payload)).await.is_err() {
                     break;
                 }
@@ -145,7 +143,7 @@ async fn handle_socket(
                 }
             }
             Message::Binary(data) => {
-                let parsed = bincode::serde::decode_from_slice::<ClientMessage, _>(
+                let parsed = bincode::decode_from_slice::<ClientMessage, _>(
                     &data,
                     bincode::config::standard(),
                 );

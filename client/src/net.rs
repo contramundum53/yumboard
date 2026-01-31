@@ -46,7 +46,7 @@ fn session_id_from_location(location: &web_sys::Location) -> Option<String> {
 
 pub fn send_message(socket: &WebSocket, message: &ClientMessage) {
     if socket.ready_state() == WebSocket::OPEN {
-        if let Ok(payload) = bincode::serde::encode_to_vec(message, bincode::config::standard()) {
+        if let Ok(payload) = bincode::encode_to_vec(message, bincode::config::standard()) {
             let _ = socket.send_with_u8_array(&payload);
         }
     }

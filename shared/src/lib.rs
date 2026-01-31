@@ -1,6 +1,7 @@
+use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Encode, Decode, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[serde(transparent)]
 pub struct StrokeId([u64; 2]);
 
@@ -10,7 +11,7 @@ impl StrokeId {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Encode, Decode, Clone, Copy, Debug, PartialEq)]
 pub struct Point {
     pub x: f32,
     pub y: f32,
@@ -29,7 +30,7 @@ fn clamp_unit(value: f32) -> f32 {
     value.max(0.0).min(1.0)
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Encode, Decode, Clone, Debug)]
 pub struct Stroke {
     pub id: StrokeId,
     pub color: Color,
@@ -37,7 +38,7 @@ pub struct Stroke {
     pub points: Vec<Point>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Encode, Decode, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Color {
     pub r: u8,
     pub g: u8,
@@ -84,7 +85,7 @@ impl Color {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Encode, Decode, Clone, Debug)]
 #[serde(tag = "op")]
 pub enum TransformOp {
     #[serde(rename = "translate")]
@@ -95,7 +96,7 @@ pub enum TransformOp {
     Rotate { center: Point, delta: f64 },
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Encode, Decode, Clone, Debug)]
 #[serde(tag = "type")]
 pub enum ClientMessage {
     #[serde(rename = "stroke:start")]
@@ -137,7 +138,7 @@ pub enum ClientMessage {
     Load { strokes: Vec<Stroke> },
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Encode, Decode, Clone, Debug)]
 #[serde(tag = "type")]
 pub enum ServerMessage {
     #[serde(rename = "sync")]

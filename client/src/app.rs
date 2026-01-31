@@ -612,7 +612,7 @@ pub fn run() -> Result<(), JsValue> {
 
             let message = if let Ok(buffer) = event.data().dyn_into::<js_sys::ArrayBuffer>() {
                 let bytes = Uint8Array::new(&buffer).to_vec();
-                match bincode::serde::decode_from_slice::<ServerMessage, _>(
+                match bincode::decode_from_slice::<ServerMessage, _>(
                     &bytes,
                     bincode::config::standard(),
                 ) {
