@@ -111,9 +111,7 @@ fn coalesced_pointer_events(event: &PointerEvent) -> Vec<PointerEvent> {
             out.push(event);
         }
     }
-    if out.is_empty() {
-        out.push(event.clone());
-    }
+    out.push(event.clone());
     out
 }
 
