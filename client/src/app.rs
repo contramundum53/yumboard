@@ -1165,7 +1165,6 @@ pub fn run() -> Result<(), JsValue> {
                             redraw(&mut state);
                             continue;
                         }
-                        state.pinch = None;
                     }
                 }
                 let (pan_x, pan_y, zoom) = {
@@ -1345,6 +1344,12 @@ pub fn run() -> Result<(), JsValue> {
         let stop_pending_points = pending_points.clone();
         let onstop = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             let mut state = stop_state.borrow_mut();
+            if is_touch_event(&event) {
+                state.touch_points.remove(&event.pointer_id());
+                if state.touch_points.len() < 2 {
+                    state.pinch = None;
+                }
+            }
             let active = matches!(
                 &state.mode,
                 Mode::Select(_)
@@ -1359,12 +1364,6 @@ pub fn run() -> Result<(), JsValue> {
                 return;
             }
             event.prevent_default();
-            if is_touch_event(&event) {
-                state.touch_points.remove(&event.pointer_id());
-                if state.touch_points.len() < 2 {
-                    state.pinch = None;
-                }
-            }
             if stop_canvas.has_pointer_capture(event.pointer_id()) {
                 let _ = stop_canvas.release_pointer_capture(event.pointer_id());
             }
@@ -1428,6 +1427,10 @@ pub fn run() -> Result<(), JsValue> {
         canvas
             .add_event_listener_with_callback("pointercancel", onstop.as_ref().unchecked_ref())?;
         canvas.add_event_listener_with_callback("pointerleave", onstop.as_ref().unchecked_ref())?;
+        canvas.add_event_listener_with_callback(
+            "lostpointercapture",
+            onstop.as_ref().unchecked_ref(),
+        )?;
         onstop.forget();
     }
 
