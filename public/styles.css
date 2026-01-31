@@ -482,6 +482,10 @@ body {
     gap: 8px;
   }
 
+  .range-value {
+    margin-top: 6px;
+  }
+
   .range-control::before {
     display: none;
   }
