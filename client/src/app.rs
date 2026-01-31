@@ -58,6 +58,24 @@ fn window_is_secure_context(window: &web_sys::Window) -> Option<bool> {
         .as_bool()
 }
 
+fn document_hidden(document: &web_sys::Document) -> Option<bool> {
+    Reflect::get(document.as_ref(), &JsValue::from_str("hidden"))
+        .ok()?
+        .as_bool()
+}
+
+fn document_visibility_state(document: &web_sys::Document) -> Option<String> {
+    Reflect::get(document.as_ref(), &JsValue::from_str("visibilityState"))
+        .ok()?
+        .as_string()
+}
+
+fn page_transition_persisted(event: &Event) -> Option<bool> {
+    Reflect::get(event.as_ref(), &JsValue::from_str("persisted"))
+        .ok()?
+        .as_bool()
+}
+
 fn set_debug_mark(window: &web_sys::Window, mark: &str) {
     let _ = Reflect::set(
         window.as_ref(),
@@ -269,6 +287,44 @@ pub fn run() -> Result<(), JsValue> {
         web_sys::console::log_1(
             &"Tip: keep this session URL but add `?debug=1` to enable logs.".into(),
         );
+
+        {
+            let document_target = document.clone();
+            let document_cb = document_target.clone();
+            let onvisibilitychange = Closure::<dyn FnMut(Event)>::new(move |_| {
+                let hidden = document_hidden(&document_cb);
+                let visibility = document_visibility_state(&document_cb);
+                web_sys::console::log_1(
+                    &format!("visibilitychange hidden={hidden:?} visibility_state={visibility:?}")
+                        .into(),
+                );
+            });
+            document_target.add_event_listener_with_callback(
+                "visibilitychange",
+                onvisibilitychange.as_ref().unchecked_ref(),
+            )?;
+            onvisibilitychange.forget();
+        }
+
+        {
+            let document = document.clone();
+            let onpageshow = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
+                let persisted = page_transition_persisted(&event);
+                let hidden = document_hidden(&document);
+                let visibility = document_visibility_state(&document);
+                web_sys::console::log_1(
+                    &format!(
+                        "pageshow persisted={persisted:?} hidden={hidden:?} visibility_state={visibility:?}"
+                    )
+                    .into(),
+                );
+            });
+            window.add_event_listener_with_callback(
+                "pageshow",
+                onpageshow.as_ref().unchecked_ref(),
+            )?;
+            onpageshow.forget();
+        }
     }
 
     set_debug_mark(&window, "run:dom_ready");
@@ -353,46 +409,6 @@ pub fn run() -> Result<(), JsValue> {
     let socket = Rc::new(WebSocket::new(&ws_url)?);
     set_debug_mark(&window, "ws:created");
     web_sys::console::log_1(&format!("WS created ready_state={}", socket.ready_state()).into());
-    let pending_points = Rc::new(RefCell::new(HashMap::<StrokeId, Vec<Point>>::new()));
-    let flush_scheduled = Rc::new(Cell::new(false));
-    let active_draw_pointer: Rc<Cell<Option<i32>>> = Rc::new(Cell::new(None));
-    let active_draw_timestamp = Rc::new(Cell::new(0.0));
-    let pointer_move_marked = Rc::new(Cell::new(false));
-    let schedule_flush: Rc<dyn Fn()> = Rc::new({
-        let pending_points = pending_points.clone();
-        let flush_scheduled = flush_scheduled.clone();
-        let socket = socket.clone();
-        let window = window.clone();
-        move || {
-            if flush_scheduled.replace(true) {
-                return;
-            }
-            let pending_points = pending_points.clone();
-            let flush_scheduled = flush_scheduled.clone();
-            let socket = socket.clone();
-            let cb = Closure::once_into_js(move |_: f64| {
-                flush_scheduled.set(false);
-                let mut pending_guard = pending_points.borrow_mut();
-                let pending = std::mem::take(&mut *pending_guard);
-                drop(pending_guard);
-                for (id, mut points) in pending {
-                    const MAX_POINTS_PER_MESSAGE: usize = 128;
-                    while !points.is_empty() {
-                        let chunk_size = points.len().min(MAX_POINTS_PER_MESSAGE);
-                        let chunk = points.drain(..chunk_size).collect::<Vec<_>>();
-                        send_message(
-                            &socket,
-                            &ClientMessage::StrokePoints {
-                                id: id.clone(),
-                                points: chunk,
-                            },
-                        );
-                    }
-                }
-            });
-            let _ = window.request_animation_frame(cb.unchecked_ref());
-        }
-    });
 
     {
         let status_el = status_el.clone();
@@ -420,12 +436,15 @@ pub fn run() -> Result<(), JsValue> {
         let status_text = status_text.clone();
         let socket_cb = socket.clone();
         let ws_url = ws_url.clone();
+        let document_cb = document.clone();
         let window_cb = window.clone();
         let onclose = Closure::<dyn FnMut(CloseEvent)>::new(move |event: CloseEvent| {
             set_debug_mark(&window_cb, "ws:close");
+            let hidden = document_hidden(&document_cb);
+            let visibility = document_visibility_state(&document_cb);
             web_sys::console::warn_1(
                 &format!(
-                    "WS close url={ws_url} code={} was_clean={} reason={:?} ready_state={}",
+                    "WS close url={ws_url} code={} was_clean={} reason={:?} ready_state={} hidden={hidden:?} visibility_state={visibility:?}",
                     event.code(),
                     event.was_clean(),
                     event.reason(),
@@ -490,11 +509,15 @@ pub fn run() -> Result<(), JsValue> {
     if debug {
         let socket = socket.clone();
         let ws_url = ws_url.clone();
-        let onpagehide = Closure::<dyn FnMut(Event)>::new(move |_| {
+        let document_cb = document.clone();
+        let onpagehide = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
+            let persisted = page_transition_persisted(&event);
+            let hidden = document_hidden(&document_cb);
+            let visibility = document_visibility_state(&document_cb);
             web_sys::console::log_1(
                 &format!(
-                    "pagehide url={ws_url} (no ws.close) ready_state={}",
-                    socket.ready_state()
+                    "pagehide url={ws_url} persisted={persisted:?} ready_state={} hidden={hidden:?} visibility_state={visibility:?} (no ws.close)",
+                    socket.ready_state(),
                 )
                 .into(),
             );
@@ -627,6 +650,47 @@ pub fn run() -> Result<(), JsValue> {
     }
 
     set_debug_mark(&window, "ws:onmessage_set");
+
+    let pending_points = Rc::new(RefCell::new(HashMap::<StrokeId, Vec<Point>>::new()));
+    let flush_scheduled = Rc::new(Cell::new(false));
+    let active_draw_pointer: Rc<Cell<Option<i32>>> = Rc::new(Cell::new(None));
+    let active_draw_timestamp = Rc::new(Cell::new(0.0));
+    let pointer_move_marked = Rc::new(Cell::new(false));
+    let schedule_flush: Rc<dyn Fn()> = Rc::new({
+        let pending_points = pending_points.clone();
+        let flush_scheduled = flush_scheduled.clone();
+        let socket = socket.clone();
+        let window = window.clone();
+        move || {
+            if flush_scheduled.replace(true) {
+                return;
+            }
+            let pending_points = pending_points.clone();
+            let flush_scheduled = flush_scheduled.clone();
+            let socket = socket.clone();
+            let cb = Closure::once_into_js(move |_: f64| {
+                flush_scheduled.set(false);
+                let mut pending_guard = pending_points.borrow_mut();
+                let pending = std::mem::take(&mut *pending_guard);
+                drop(pending_guard);
+                for (id, mut points) in pending {
+                    const MAX_POINTS_PER_MESSAGE: usize = 128;
+                    while !points.is_empty() {
+                        let chunk_size = points.len().min(MAX_POINTS_PER_MESSAGE);
+                        let chunk = points.drain(..chunk_size).collect::<Vec<_>>();
+                        send_message(
+                            &socket,
+                            &ClientMessage::StrokePoints {
+                                id: id.clone(),
+                                points: chunk,
+                            },
+                        );
+                    }
+                }
+            });
+            let _ = window.request_animation_frame(cb.unchecked_ref());
+        }
+    });
 
     {
         let resize_state = state.clone();
