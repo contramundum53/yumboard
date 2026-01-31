@@ -1325,6 +1325,9 @@ pub fn run() -> Result<(), JsValue> {
                             DrawMode::Drawing { id } => id.clone(),
                             _ => continue,
                         };
+                        if event.buttons() == 0 && event.pressure() == 0.0 {
+                            continue;
+                        }
                         let point = match event_to_point(&move_canvas, &event, pan_x, pan_y, zoom) {
                             Some(point) => point,
                             None => continue,
