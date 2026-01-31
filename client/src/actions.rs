@@ -45,17 +45,25 @@ pub fn start_stroke(state: &mut State, id: String, color: String, size: f32, poi
     );
 }
 
-pub fn move_stroke(state: &mut State, id: &str, point: Point) {
+pub fn move_stroke(state: &mut State, id: &str, point: Point) -> bool {
     let point = match normalize_point(point) {
         Some(point) => point,
-        None => return,
+        None => return false,
     };
     if !state.active_ids.contains(id) {
-        return;
+        return false;
     }
     let mut draw_action = None;
-    if let Some(stroke) = state.strokes.iter_mut().find(|stroke| stroke.id == id) {
+    if let Some(stroke) = state
+        .strokes
+        .iter_mut()
+        .rev()
+        .find(|stroke| stroke.id == id)
+    {
         if let Some(last) = stroke.points.last().copied() {
+            if last == point {
+                return false;
+            }
             stroke.points.push(point);
             draw_action = Some((last, point, stroke.color.clone(), stroke.size));
         } else {
@@ -86,7 +94,9 @@ pub fn move_stroke(state: &mut State, id: &str, point: Point) {
                 size,
             );
         }
+        return true;
     }
+    false
 }
 
 pub fn end_stroke(state: &mut State, id: &str) {
@@ -187,13 +197,6 @@ pub fn apply_transformed_strokes(state: &mut State, strokes: &[Stroke]) {
         replace_stroke_local(state, stroke.clone());
     }
     redraw(state);
-}
-
-pub fn last_point_for_id(strokes: &[Stroke], id: &str) -> Option<Point> {
-    strokes
-        .iter()
-        .find(|stroke| stroke.id == id)
-        .and_then(|stroke| stroke.points.last().copied())
 }
 
 pub fn finalize_lasso_selection(state: &mut State) {

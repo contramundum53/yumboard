@@ -39,6 +39,8 @@ pub enum ClientMessage {
     },
     #[serde(rename = "stroke:move")]
     StrokeMove { id: String, point: Point },
+    #[serde(rename = "stroke:points")]
+    StrokePoints { id: String, points: Vec<Point> },
     #[serde(rename = "stroke:end")]
     StrokeEnd { id: String },
     #[serde(rename = "clear")]
@@ -75,6 +77,8 @@ pub enum ServerMessage {
     },
     #[serde(rename = "stroke:move")]
     StrokeMove { id: String, point: Point },
+    #[serde(rename = "stroke:points")]
+    StrokePoints { id: String, points: Vec<Point> },
     #[serde(rename = "stroke:end")]
     StrokeEnd { id: String },
     #[serde(rename = "clear")]

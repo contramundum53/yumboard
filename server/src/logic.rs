@@ -72,6 +72,47 @@ pub fn apply_client_message(
             }
             None
         }
+        ClientMessage::StrokePoints { id, points } => {
+            if id.is_empty() || id.len() > 64 {
+                return None;
+            }
+            if points.is_empty() {
+                return None;
+            }
+            if !session.active_ids.contains(&id) {
+                return None;
+            }
+            let Some(stroke) = session.strokes.iter_mut().find(|stroke| stroke.id == id) else {
+                return None;
+            };
+            if stroke.points.len() >= MAX_POINTS_PER_STROKE {
+                return None;
+            }
+
+            const MAX_POINTS_PER_MESSAGE: usize = 256;
+            let remaining = MAX_POINTS_PER_STROKE.saturating_sub(stroke.points.len());
+            let max_points = remaining.min(MAX_POINTS_PER_MESSAGE);
+
+            let mut accepted = Vec::new();
+            for point in points
+                .into_iter()
+                .filter_map(normalize_point)
+                .take(max_points)
+            {
+                stroke.points.push(point);
+                accepted.push(point);
+            }
+            if accepted.is_empty() {
+                return None;
+            }
+            Some((
+                vec![ServerMessage::StrokePoints {
+                    id,
+                    points: accepted,
+                }],
+                false,
+            ))
+        }
         ClientMessage::StrokeEnd { id } => {
             if id.is_empty() || id.len() > 64 {
                 return None;

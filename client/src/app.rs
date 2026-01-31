@@ -1,5 +1,5 @@
-use std::cell::RefCell;
-use std::collections::HashSet;
+use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use js_sys::{Function, Reflect};
@@ -11,12 +11,12 @@ use web_sys::{
     PointerEvent, ProgressEvent, WebSocket,
 };
 
-use yumboard_shared::{ClientMessage, ServerMessage, Stroke};
+use yumboard_shared::{ClientMessage, Point, ServerMessage, Stroke};
 
 use crate::actions::{
     adopt_strokes, apply_transformed_strokes, clear_board, end_stroke, erase_hits_at_point,
-    finalize_lasso_selection, last_point_for_id, move_stroke, remove_stroke, replace_stroke_local,
-    restore_stroke, sanitize_size, start_stroke,
+    finalize_lasso_selection, move_stroke, remove_stroke, replace_stroke_local, restore_stroke,
+    sanitize_size, start_stroke,
 };
 use crate::dom::{
     event_to_point, get_element, resize_canvas, set_canvas_mode, set_status, set_tool_button,
@@ -242,6 +242,43 @@ pub fn run() -> Result<(), JsValue> {
 
     let ws_url = websocket_url(&window)?;
     let socket = Rc::new(WebSocket::new(&ws_url)?);
+    let pending_points = Rc::new(RefCell::new(HashMap::<String, Vec<Point>>::new()));
+    let flush_scheduled = Rc::new(Cell::new(false));
+    let schedule_flush: Rc<dyn Fn()> = Rc::new({
+        let pending_points = pending_points.clone();
+        let flush_scheduled = flush_scheduled.clone();
+        let socket = socket.clone();
+        let window = window.clone();
+        move || {
+            if flush_scheduled.replace(true) {
+                return;
+            }
+            let pending_points = pending_points.clone();
+            let flush_scheduled = flush_scheduled.clone();
+            let socket = socket.clone();
+            let cb = Closure::once_into_js(move |_: f64| {
+                flush_scheduled.set(false);
+                let mut pending_guard = pending_points.borrow_mut();
+                let pending = std::mem::take(&mut *pending_guard);
+                drop(pending_guard);
+                for (id, mut points) in pending {
+                    const MAX_POINTS_PER_MESSAGE: usize = 128;
+                    while !points.is_empty() {
+                        let chunk_size = points.len().min(MAX_POINTS_PER_MESSAGE);
+                        let chunk = points.drain(..chunk_size).collect::<Vec<_>>();
+                        send_message(
+                            &socket,
+                            &ClientMessage::StrokePoints {
+                                id: id.clone(),
+                                points: chunk,
+                            },
+                        );
+                    }
+                }
+            });
+            let _ = window.request_animation_frame(cb.unchecked_ref());
+        }
+    });
 
     {
         let status_el = status_el.clone();
@@ -299,7 +336,12 @@ pub fn run() -> Result<(), JsValue> {
                     start_stroke(&mut state, id, color, size, point);
                 }
                 ServerMessage::StrokeMove { id, point } => {
-                    move_stroke(&mut state, &id, point);
+                    let _ = move_stroke(&mut state, &id, point);
+                }
+                ServerMessage::StrokePoints { id, points } => {
+                    for point in points {
+                        let _ = move_stroke(&mut state, &id, point);
+                    }
                 }
                 ServerMessage::StrokeEnd { id } => {
                     end_stroke(&mut state, &id);
@@ -1011,6 +1053,8 @@ pub fn run() -> Result<(), JsValue> {
         let move_state = state.clone();
         let move_socket = socket.clone();
         let move_canvas = canvas.clone();
+        let move_pending_points = pending_points.clone();
+        let move_schedule_flush = schedule_flush.clone();
         let onmove = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             for event in coalesced_pointer_events(&event) {
                 let (pan_x, pan_y, zoom) = {
@@ -1162,13 +1206,14 @@ pub fn run() -> Result<(), JsValue> {
                             Some(point) => point,
                             None => continue,
                         };
-                        if let Some(last_point) = last_point_for_id(&state.strokes, &id) {
-                            if last_point == point {
-                                continue;
-                            }
+                        if move_stroke(&mut state, &id, point) {
+                            move_pending_points
+                                .borrow_mut()
+                                .entry(id)
+                                .or_default()
+                                .push(point);
+                            move_schedule_flush();
                         }
-                        move_stroke(&mut state, &id, point);
-                        send_message(&move_socket, &ClientMessage::StrokeMove { id, point });
                     }
                     _ => {}
                 }
@@ -1186,6 +1231,7 @@ pub fn run() -> Result<(), JsValue> {
         let stop_state = state.clone();
         let stop_socket = socket.clone();
         let stop_canvas = canvas.clone();
+        let stop_pending_points = pending_points.clone();
         let onstop = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             let mut state = stop_state.borrow_mut();
             let active = matches!(
@@ -1242,6 +1288,20 @@ pub fn run() -> Result<(), JsValue> {
                     draw.mode = DrawMode::Idle;
                     end_stroke(&mut state, &id);
                     drop(state);
+                    if let Some(mut points) = stop_pending_points.borrow_mut().remove(&id) {
+                        const MAX_POINTS_PER_MESSAGE: usize = 128;
+                        while !points.is_empty() {
+                            let chunk_size = points.len().min(MAX_POINTS_PER_MESSAGE);
+                            let chunk = points.drain(..chunk_size).collect::<Vec<_>>();
+                            send_message(
+                                &stop_socket,
+                                &ClientMessage::StrokePoints {
+                                    id: id.clone(),
+                                    points: chunk,
+                                },
+                            );
+                        }
+                    }
                     send_message(&stop_socket, &ClientMessage::StrokeEnd { id });
                 }
                 _ => {}
