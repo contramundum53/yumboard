@@ -124,6 +124,7 @@ fn coalesced_pointer_events(event: &PointerEvent) -> Vec<PointerEvent> {
             out.push(event);
         }
     }
+    out.push(event.clone());
     out
 }
 
@@ -254,6 +255,8 @@ pub fn run() -> Result<(), JsValue> {
     let socket = Rc::new(WebSocket::new(&ws_url)?);
     let pending_points = Rc::new(RefCell::new(HashMap::<String, Vec<Point>>::new()));
     let flush_scheduled = Rc::new(Cell::new(false));
+    let active_draw_pointer: Rc<Cell<Option<i32>>> = Rc::new(Cell::new(None));
+    let active_draw_timestamp = Rc::new(Cell::new(0.0));
     let schedule_flush: Rc<dyn Fn()> = Rc::new({
         let pending_points = pending_points.clone();
         let flush_scheduled = flush_scheduled.clone();
@@ -318,6 +321,30 @@ pub fn run() -> Result<(), JsValue> {
         });
         socket.set_onerror(Some(onerror.as_ref().unchecked_ref()));
         onerror.forget();
+    }
+
+    // iOS Safari can keep WebSocket connections alive longer than expected across reloads /
+    // page transitions, which can leave the next connection stuck in CONNECTING. Close the socket
+    // proactively when the page is hidden/unloaded.
+    {
+        let socket = socket.clone();
+        let onpagehide = Closure::<dyn FnMut(Event)>::new(move |_| {
+            let _ = socket.close();
+        });
+        window.add_event_listener_with_callback("pagehide", onpagehide.as_ref().unchecked_ref())?;
+        onpagehide.forget();
+    }
+
+    {
+        let socket = socket.clone();
+        let onbeforeunload = Closure::<dyn FnMut(Event)>::new(move |_| {
+            let _ = socket.close();
+        });
+        window.add_event_listener_with_callback(
+            "beforeunload",
+            onbeforeunload.as_ref().unchecked_ref(),
+        )?;
+        onbeforeunload.forget();
     }
 
     {
@@ -890,6 +917,8 @@ pub fn run() -> Result<(), JsValue> {
         let down_canvas = canvas.clone();
         let down_color = color_input.clone();
         let down_size = size_input.clone();
+        let down_active_draw_pointer = active_draw_pointer.clone();
+        let down_active_draw_timestamp = active_draw_timestamp.clone();
         let ondown = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             if event.button() != 0 {
                 return;
@@ -925,6 +954,8 @@ pub fn run() -> Result<(), JsValue> {
                             draw.mode = DrawMode::Idle;
                             end_stroke(&mut state, &id);
                             send_message(&down_socket, &ClientMessage::StrokeEnd { id });
+                            down_active_draw_pointer.set(None);
+                            down_active_draw_timestamp.set(0.0);
                         }
                     }
                     let _ = down_canvas.set_pointer_capture(event.pointer_id());
@@ -1103,6 +1134,9 @@ pub fn run() -> Result<(), JsValue> {
                     let color = down_color.value();
                     let size = sanitize_size(down_size.value_as_number() as f32);
 
+                    down_active_draw_pointer.set(Some(event.pointer_id()));
+                    down_active_draw_timestamp.set(event.time_stamp() - 0.0001);
+
                     draw.mode = DrawMode::Drawing { id: id.clone() };
                     state.mode = Mode::Draw(draw);
                     start_stroke(&mut state, id.clone(), color.clone(), size, point);
@@ -1130,6 +1164,8 @@ pub fn run() -> Result<(), JsValue> {
         let move_canvas = canvas.clone();
         let move_pending_points = pending_points.clone();
         let move_schedule_flush = schedule_flush.clone();
+        let move_active_draw_pointer = active_draw_pointer.clone();
+        let move_active_draw_timestamp = active_draw_timestamp.clone();
         let onmove = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             for event in coalesced_pointer_events(&event) {
                 if is_touch_event(&event) {
@@ -1325,9 +1361,14 @@ pub fn run() -> Result<(), JsValue> {
                             DrawMode::Drawing { id } => id.clone(),
                             _ => continue,
                         };
-                        if event.buttons() == 0 && event.pressure() == 0.0 {
+                        if move_active_draw_pointer.get() != Some(event.pointer_id()) {
                             continue;
                         }
+                        let timestamp = event.time_stamp();
+                        if timestamp <= move_active_draw_timestamp.get() {
+                            continue;
+                        }
+                        move_active_draw_timestamp.set(timestamp);
                         let point = match event_to_point(&move_canvas, &event, pan_x, pan_y, zoom) {
                             Some(point) => point,
                             None => continue,
@@ -1358,6 +1399,8 @@ pub fn run() -> Result<(), JsValue> {
         let stop_socket = socket.clone();
         let stop_canvas = canvas.clone();
         let stop_pending_points = pending_points.clone();
+        let stop_active_draw_pointer = active_draw_pointer.clone();
+        let stop_active_draw_timestamp = active_draw_timestamp.clone();
         let onstop = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             let mut state = stop_state.borrow_mut();
             if is_touch_event(&event) {
@@ -1368,6 +1411,11 @@ pub fn run() -> Result<(), JsValue> {
                 if state.touch_points.is_empty() {
                     state.touch_pan = None;
                 }
+                event.prevent_default();
+                if stop_canvas.has_pointer_capture(event.pointer_id()) {
+                    let _ = stop_canvas.release_pointer_capture(event.pointer_id());
+                }
+                return;
             }
             let active = matches!(
                 &state.mode,
@@ -1416,6 +1464,11 @@ pub fn run() -> Result<(), JsValue> {
                     set_canvas_mode(&state.canvas, &state.mode, false);
                 }
                 Mode::Draw(draw) => {
+                    if stop_active_draw_pointer.get() != Some(event.pointer_id()) {
+                        return;
+                    }
+                    stop_active_draw_pointer.set(None);
+                    stop_active_draw_timestamp.set(0.0);
                     let id = match &draw.mode {
                         DrawMode::Drawing { id } => id.clone(),
                         _ => return,

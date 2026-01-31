@@ -440,6 +440,8 @@ pub async fn broadcast_except(
         let mut session = session.write().await;
         for id in stale {
             session.peers.remove(&id);
+            session.histories.remove(&id);
+            session.transform_sessions.remove(&id);
         }
     }
 }
@@ -459,6 +461,8 @@ pub async fn broadcast_all(session: &Arc<RwLock<Session>>, message: ServerMessag
         let mut session = session.write().await;
         for id in stale {
             session.peers.remove(&id);
+            session.histories.remove(&id);
+            session.transform_sessions.remove(&id);
         }
     }
 }

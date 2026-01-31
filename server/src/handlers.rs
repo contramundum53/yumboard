@@ -59,6 +59,10 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: String) {
         session
             .histories
             .insert(connection_id, crate::state::ClientHistory::default());
+        eprintln!(
+            "WS connected session={session_id} conn={connection_id} peers={}",
+            session.peers.len()
+        );
     }
 
     let strokes_snapshot = session.read().await.strokes.clone();
@@ -108,6 +112,10 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: String) {
         session.peers.remove(&connection_id);
         session.histories.remove(&connection_id);
         session.transform_sessions.remove(&connection_id);
+        eprintln!(
+            "WS disconnected session={session_id} conn={connection_id} peers={}",
+            session.peers.len()
+        );
     }
     send_task.abort();
 
