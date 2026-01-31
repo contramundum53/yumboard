@@ -2,16 +2,26 @@ import init from "./pkg/yumboard_client.js";
 
 // If an iOS devtools extension injects Eruda, it may require explicit init.
 // Do this opportunistically (and safely) so debug logging doesn't crash the app.
-if (window.eruda && typeof window.eruda.init === "function") {
-  if (!window.__yumboard_eruda_inited) {
-    window.__yumboard_eruda_inited = true;
-    try {
-      window.eruda.init();
-    } catch (e) {
-      // Best-effort only.
-    }
+function maybeInitEruda() {
+  const eruda = window.eruda;
+  if (!eruda || typeof eruda.init !== "function") {
+    return;
+  }
+  if (window.__yumboard_eruda_inited) {
+    return;
+  }
+  window.__yumboard_eruda_inited = true;
+  try {
+    eruda.init();
+  } catch (e) {
+    // Best-effort only.
   }
 }
+
+maybeInitEruda();
+setTimeout(maybeInitEruda, 0);
+setTimeout(maybeInitEruda, 250);
+setTimeout(maybeInitEruda, 1000);
 
 window.addEventListener("error", (event) => {
   const yumboardMark = window.__yumboard_last_mark || null;
