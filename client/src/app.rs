@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use js_sys::{Function, Reflect};
+use js_sys::{Function, Reflect, Uint8Array};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
@@ -407,6 +407,11 @@ pub fn run() -> Result<(), JsValue> {
     set_debug_mark(&window, "ws:connecting");
     web_sys::console::log_1(&format!("WS connecting url={ws_url}").into());
     let socket = Rc::new(WebSocket::new(&ws_url)?);
+    let _ = Reflect::set(
+        socket.as_ref(),
+        &JsValue::from_str("binaryType"),
+        &JsValue::from_str("arraybuffer"),
+    );
     set_debug_mark(&window, "ws:created");
     web_sys::console::log_1(&format!("WS created ready_state={}", socket.ready_state()).into());
 
@@ -548,29 +553,39 @@ pub fn run() -> Result<(), JsValue> {
         let message_count_cb = message_count.clone();
         let window_cb = window.clone();
         let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
-            let text = match event.data().as_string() {
-                Some(text) => text,
-                None => {
-                    web_sys::console::error_2(
-                        &"WS message data is not a string".into(),
-                        &event.data(),
-                    );
-                    return;
+            let message = if let Ok(buffer) = event.data().dyn_into::<js_sys::ArrayBuffer>() {
+                let bytes = Uint8Array::new(&buffer).to_vec();
+                match bincode::deserialize::<ServerMessage>(&bytes) {
+                    Ok(message) => message,
+                    Err(error) => {
+                        web_sys::console::error_1(
+                            &format!("WS message bincode parse error: {error}").into(),
+                        );
+                        return;
+                    }
                 }
-            };
-            let message = match serde_json::from_str::<ServerMessage>(&text) {
-                Ok(message) => message,
-                Err(error) => {
-                    let snippet = if text.len() <= 200 {
-                        text
-                    } else {
-                        format!("{}...", &text[..200])
-                    };
-                    web_sys::console::error_1(
-                        &format!("WS message JSON parse error: {error} payload={snippet:?}").into(),
-                    );
-                    return;
+            } else if let Some(text) = event.data().as_string() {
+                match serde_json::from_str::<ServerMessage>(&text) {
+                    Ok(message) => message,
+                    Err(error) => {
+                        let snippet = if text.len() <= 200 {
+                            text
+                        } else {
+                            format!("{}...", &text[..200])
+                        };
+                        web_sys::console::error_1(
+                            &format!("WS message JSON parse error: {error} payload={snippet:?}")
+                                .into(),
+                        );
+                        return;
+                    }
                 }
+            } else {
+                web_sys::console::error_2(
+                    &"WS message data is not a string or arraybuffer".into(),
+                    &event.data(),
+                );
+                return;
             };
 
             let count = message_count_cb.get() + 1;

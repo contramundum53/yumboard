@@ -79,14 +79,14 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: String) {
 
     let strokes_snapshot = session.read().await.strokes.clone();
     let strokes_len = strokes_snapshot.len();
-    if let Ok(sync_payload) = serde_json::to_string(&ServerMessage::Sync {
+    if let Ok(sync_payload) = bincode::serialize(&ServerMessage::Sync {
         strokes: strokes_snapshot,
     }) {
         eprintln!(
             "WS sync send session={session_id} conn={connection_id} strokes={strokes_len} bytes={}",
             sync_payload.len()
         );
-        if let Err(error) = socket_sender.send(Message::Text(sync_payload)).await {
+        if let Err(error) = socket_sender.send(Message::Binary(sync_payload)).await {
             eprintln!(
                 "WS sync send failed session={session_id} conn={connection_id} error={error:?}"
             );
@@ -97,8 +97,8 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: String) {
 
     let send_task = tokio::spawn(async move {
         while let Some(message) = rx.recv().await {
-            if let Ok(payload) = serde_json::to_string(&message) {
-                if socket_sender.send(Message::Text(payload)).await.is_err() {
+            if let Ok(payload) = bincode::serialize(&message) {
+                if socket_sender.send(Message::Binary(payload)).await.is_err() {
                     break;
                 }
             }
@@ -111,6 +111,24 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: String) {
         match message {
             Message::Text(text) => {
                 let parsed = serde_json::from_str::<ClientMessage>(&text);
+                if let Ok(client_message) = parsed {
+                    let result = {
+                        let mut session_guard = session.write().await;
+                        apply_client_message(&mut session_guard, connection_id, client_message)
+                    };
+                    if let Some((server_messages, include_sender)) = result {
+                        for server_message in server_messages {
+                            if include_sender {
+                                broadcast_all(&session, server_message).await;
+                            } else {
+                                broadcast_except(&session, connection_id, server_message).await;
+                            }
+                        }
+                    }
+                }
+            }
+            Message::Binary(data) => {
+                let parsed = bincode::deserialize::<ClientMessage>(&data);
                 if let Ok(client_message) = parsed {
                     let result = {
                         let mut session_guard = session.write().await;

@@ -46,8 +46,8 @@ fn session_id_from_location(location: &web_sys::Location) -> Option<String> {
 
 pub fn send_message(socket: &WebSocket, message: &ClientMessage) {
     if socket.ready_state() == WebSocket::OPEN {
-        if let Ok(payload) = serde_json::to_string(message) {
-            let _ = socket.send_with_str(&payload);
+        if let Ok(payload) = bincode::serialize(message) {
+            let _ = socket.send_with_u8_array(&payload);
         }
     }
 }
