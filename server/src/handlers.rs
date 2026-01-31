@@ -66,10 +66,21 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: String) {
     }
 
     let strokes_snapshot = session.read().await.strokes.clone();
+    let strokes_len = strokes_snapshot.len();
     if let Ok(sync_payload) = serde_json::to_string(&ServerMessage::Sync {
         strokes: strokes_snapshot,
     }) {
-        let _ = socket_sender.send(Message::Text(sync_payload)).await;
+        eprintln!(
+            "WS sync send session={session_id} conn={connection_id} strokes={strokes_len} bytes={}",
+            sync_payload.len()
+        );
+        if let Err(error) = socket_sender.send(Message::Text(sync_payload)).await {
+            eprintln!(
+                "WS sync send failed session={session_id} conn={connection_id} error={error:?}"
+            );
+        }
+    } else {
+        eprintln!("WS sync serialize failed session={session_id} conn={connection_id}");
     }
 
     let send_task = tokio::spawn(async move {
