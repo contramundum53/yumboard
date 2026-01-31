@@ -64,6 +64,12 @@ fn document_hidden(document: &web_sys::Document) -> Option<bool> {
         .as_bool()
 }
 
+fn document_ready_state(document: &web_sys::Document) -> Option<String> {
+    Reflect::get(document.as_ref(), &JsValue::from_str("readyState"))
+        .ok()?
+        .as_string()
+}
+
 fn document_visibility_state(document: &web_sys::Document) -> Option<String> {
     Reflect::get(document.as_ref(), &JsValue::from_str("visibilityState"))
         .ok()?
@@ -283,6 +289,35 @@ fn read_load_payload(event: &ProgressEvent) -> Option<Vec<Stroke>> {
 
 #[wasm_bindgen(start)]
 pub fn run() -> Result<(), JsValue> {
+    console_error_panic_hook::set_once();
+
+    let window = web_sys::window().ok_or_else(|| JsValue::from_str("Missing window"))?;
+    let document = window
+        .document()
+        .ok_or_else(|| JsValue::from_str("Missing document"))?;
+    let started = Rc::new(Cell::new(false));
+
+    if document_ready_state(&document).as_deref() == Some("complete") {
+        started.set(true);
+        return start_app();
+    }
+
+    let onload_started = started.clone();
+    let onload = Closure::<dyn FnMut(Event)>::new(move |_| {
+        if onload_started.replace(true) {
+            return;
+        }
+        if let Err(err) = start_app() {
+            web_sys::console::error_1(&err);
+        }
+    });
+    window.add_event_listener_with_callback("load", onload.as_ref().unchecked_ref())?;
+    onload.forget();
+
+    Ok(())
+}
+
+fn start_app() -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
 
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("Missing window"))?;
