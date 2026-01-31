@@ -469,6 +469,10 @@ body {
   }
 }
 
+body:not(.is-chrome) * {
+  animation: none !important;
+}
+
 @supports (-webkit-touch-callout: none) {
   .toolbar {
     display: flex;
