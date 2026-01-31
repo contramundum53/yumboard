@@ -1,5 +1,33 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
+#[serde(transparent)]
+pub struct StrokeId(pub String);
+
+impl StrokeId {
+    pub fn new(value: String) -> Self {
+        Self(value)
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl From<String> for StrokeId {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct Point {
     pub x: f32,
@@ -21,7 +49,7 @@ fn clamp_unit(value: f32) -> f32 {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Stroke {
-    pub id: String,
+    pub id: StrokeId,
     pub color: String,
     pub size: f32,
     pub points: Vec<Point>,
@@ -43,17 +71,17 @@ pub enum TransformOp {
 pub enum ClientMessage {
     #[serde(rename = "stroke:start")]
     StrokeStart {
-        id: String,
+        id: StrokeId,
         color: String,
         size: f32,
         point: Point,
     },
     #[serde(rename = "stroke:move")]
-    StrokeMove { id: String, point: Point },
+    StrokeMove { id: StrokeId, point: Point },
     #[serde(rename = "stroke:points")]
-    StrokePoints { id: String, points: Vec<Point> },
+    StrokePoints { id: StrokeId, points: Vec<Point> },
     #[serde(rename = "stroke:end")]
-    StrokeEnd { id: String },
+    StrokeEnd { id: StrokeId },
     #[serde(rename = "clear")]
     Clear,
     #[serde(rename = "undo")]
@@ -61,21 +89,21 @@ pub enum ClientMessage {
     #[serde(rename = "redo")]
     Redo,
     #[serde(rename = "erase")]
-    Erase { id: String },
+    Erase { id: StrokeId },
     #[serde(rename = "stroke:replace")]
     StrokeReplace { stroke: Stroke },
     #[serde(rename = "transform:update")]
     TransformUpdate {
-        ids: Vec<String>,
+        ids: Vec<StrokeId>,
         #[serde(flatten)]
         op: TransformOp,
     },
     #[serde(rename = "transform:start")]
-    TransformStart { ids: Vec<String> },
+    TransformStart { ids: Vec<StrokeId> },
     #[serde(rename = "transform:end")]
-    TransformEnd { ids: Vec<String> },
+    TransformEnd { ids: Vec<StrokeId> },
     #[serde(rename = "remove")]
-    Remove { ids: Vec<String> },
+    Remove { ids: Vec<StrokeId> },
     #[serde(rename = "load")]
     Load { strokes: Vec<Stroke> },
 }
@@ -87,28 +115,28 @@ pub enum ServerMessage {
     Sync { strokes: Vec<Stroke> },
     #[serde(rename = "stroke:start")]
     StrokeStart {
-        id: String,
+        id: StrokeId,
         color: String,
         size: f32,
         point: Point,
     },
     #[serde(rename = "stroke:move")]
-    StrokeMove { id: String, point: Point },
+    StrokeMove { id: StrokeId, point: Point },
     #[serde(rename = "stroke:points")]
-    StrokePoints { id: String, points: Vec<Point> },
+    StrokePoints { id: StrokeId, points: Vec<Point> },
     #[serde(rename = "stroke:end")]
-    StrokeEnd { id: String },
+    StrokeEnd { id: StrokeId },
     #[serde(rename = "clear")]
     Clear,
     #[serde(rename = "stroke:remove")]
-    StrokeRemove { id: String },
+    StrokeRemove { id: StrokeId },
     #[serde(rename = "stroke:restore")]
     StrokeRestore { stroke: Stroke },
     #[serde(rename = "stroke:replace")]
     StrokeReplace { stroke: Stroke },
     #[serde(rename = "transform:update")]
     TransformUpdate {
-        ids: Vec<String>,
+        ids: Vec<StrokeId>,
         #[serde(flatten)]
         op: TransformOp,
     },

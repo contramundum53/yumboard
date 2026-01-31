@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use wasm_bindgen::prelude::Closure;
 use web_sys::{CanvasRenderingContext2d, FileReader, HtmlCanvasElement, ProgressEvent};
 
-use yumboard_shared::{Point, Stroke};
+use yumboard_shared::{Point, Stroke, StrokeId};
 
 pub const DEFAULT_PALETTE: [&str; 1] = ["#1f1f1f"];
 pub const STROKE_UNIT: f64 = 1.0;
@@ -30,7 +30,7 @@ pub enum SelectionHit {
 
 pub enum DrawMode {
     Idle,
-    Drawing { id: String },
+    Drawing { id: StrokeId },
 }
 
 pub struct DrawState {
@@ -40,7 +40,7 @@ pub struct DrawState {
 
 pub enum EraseMode {
     Idle,
-    Active { hits: HashSet<String> },
+    Active { hits: HashSet<StrokeId> },
 }
 
 pub enum PanMode {
@@ -81,7 +81,7 @@ pub enum SelectMode {
 }
 
 pub struct SelectState {
-    pub selected_ids: Vec<String>,
+    pub selected_ids: Vec<StrokeId>,
     pub mode: SelectMode,
 }
 
@@ -110,7 +110,7 @@ pub struct State {
     pub canvas: HtmlCanvasElement,
     pub ctx: CanvasRenderingContext2d,
     pub strokes: Vec<Stroke>,
-    pub active_ids: HashSet<String>,
+    pub active_ids: HashSet<StrokeId>,
     pub board_width: f64,
     pub board_height: f64,
     pub zoom: f64,

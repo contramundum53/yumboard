@@ -107,7 +107,7 @@ The client computes the WS URL at runtime (`client/src/net.rs:websocket_url`) us
 Key `Session` fields:
 
 - `strokes: Vec<Stroke>`: canonical drawing state.
-- `active_ids: HashSet<String>`: strokes currently being drawn (accept move/points only for these).
+- `active_ids: HashSet<StrokeId>`: strokes currently being drawn (accept move/points only for these).
 - `owners: HashMap<stroke_id, connection_uuid>`: who created a stroke (undo ownership isolation).
 - `histories: HashMap<connection_uuid, ClientHistory>`: undo/redo stacks per connection.
 - `transform_sessions: HashMap<connection_uuid, TransformSession>`: stores "before" snapshot for a

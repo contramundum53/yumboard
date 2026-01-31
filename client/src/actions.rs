@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use yumboard_shared::{Point, Stroke, TransformOp};
+use yumboard_shared::{Point, Stroke, StrokeId, TransformOp};
 
 use crate::geometry::{home_zoom_pan, normalize_point, stroke_hit};
 use crate::render::{draw_dot, draw_segment, redraw};
@@ -21,7 +21,7 @@ pub fn sanitize_size(size: f32) -> f32 {
     size.max(1.0).min(60.0)
 }
 
-pub fn start_stroke(state: &mut State, id: String, color: String, size: f32, point: Point) {
+pub fn start_stroke(state: &mut State, id: StrokeId, color: String, size: f32, point: Point) {
     let point = match normalize_point(point) {
         Some(point) => point,
         None => return,
@@ -47,7 +47,7 @@ pub fn start_stroke(state: &mut State, id: String, color: String, size: f32, poi
     );
 }
 
-pub fn move_stroke(state: &mut State, id: &str, point: Point) -> bool {
+pub fn move_stroke(state: &mut State, id: &StrokeId, point: Point) -> bool {
     let point = match normalize_point(point) {
         Some(point) => point,
         None => return false,
@@ -60,7 +60,7 @@ pub fn move_stroke(state: &mut State, id: &str, point: Point) -> bool {
         .strokes
         .iter_mut()
         .rev()
-        .find(|stroke| stroke.id == id)
+        .find(|stroke| &stroke.id == id)
     {
         if let Some(last) = stroke.points.last().copied() {
             if last == point {
@@ -101,7 +101,7 @@ pub fn move_stroke(state: &mut State, id: &str, point: Point) -> bool {
     false
 }
 
-pub fn end_stroke(state: &mut State, id: &str) {
+pub fn end_stroke(state: &mut State, id: &StrokeId) {
     state.active_ids.remove(id);
 }
 
@@ -115,8 +115,8 @@ pub fn clear_board(state: &mut State) {
     redraw(state);
 }
 
-pub fn remove_stroke(state: &mut State, id: &str) {
-    if let Some(index) = state.strokes.iter().position(|stroke| stroke.id == id) {
+pub fn remove_stroke(state: &mut State, id: &StrokeId) {
+    if let Some(index) = state.strokes.iter().position(|stroke| &stroke.id == id) {
         state.strokes.remove(index);
         state.active_ids.remove(id);
     }
@@ -138,7 +138,7 @@ pub fn restore_stroke(state: &mut State, mut stroke: Stroke) {
     redraw(state);
 }
 
-pub fn erase_hits_at_point(state: &mut State, point: Point) -> Vec<String> {
+pub fn erase_hits_at_point(state: &mut State, point: Point) -> Vec<StrokeId> {
     let hits = match &mut state.mode {
         Mode::Erase(EraseMode::Active { hits }) => hits,
         _ => return Vec::new(),
@@ -201,18 +201,18 @@ pub fn apply_transformed_strokes(state: &mut State, strokes: &[Stroke]) {
     redraw(state);
 }
 
-pub fn apply_transform_operation(state: &mut State, ids: &[String], op: &TransformOp) {
+pub fn apply_transform_operation(state: &mut State, ids: &[StrokeId], op: &TransformOp) {
     if ids.is_empty() {
         return;
     }
-    let id_set: HashSet<&str> = ids.iter().map(|id| id.as_str()).collect();
+    let id_set: HashSet<&StrokeId> = ids.iter().collect();
     match *op {
         TransformOp::Translate { dx, dy } => {
             if !dx.is_finite() || !dy.is_finite() {
                 return;
             }
             for stroke in &mut state.strokes {
-                if !id_set.contains(stroke.id.as_str()) {
+                if !id_set.contains(&stroke.id) {
                     continue;
                 }
                 for point in &mut stroke.points {
@@ -228,7 +228,7 @@ pub fn apply_transform_operation(state: &mut State, ids: &[String], op: &Transfo
             let cx = anchor.x as f64;
             let cy = anchor.y as f64;
             for stroke in &mut state.strokes {
-                if !id_set.contains(stroke.id.as_str()) {
+                if !id_set.contains(&stroke.id) {
                     continue;
                 }
                 for point in &mut stroke.points {
@@ -248,7 +248,7 @@ pub fn apply_transform_operation(state: &mut State, ids: &[String], op: &Transfo
             let cos = delta.cos();
             let sin = delta.sin();
             for stroke in &mut state.strokes {
-                if !id_set.contains(stroke.id.as_str()) {
+                if !id_set.contains(&stroke.id) {
                     continue;
                 }
                 for point in &mut stroke.points {

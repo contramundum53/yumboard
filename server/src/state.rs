@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
-use yumboard_shared::Stroke;
+use yumboard_shared::{Stroke, StrokeId};
 
 pub const MAX_STROKES: usize = 2000;
 pub const MAX_POINTS_PER_STROKE: usize = 5000;
@@ -17,8 +17,8 @@ pub struct AppState {
 
 pub struct Session {
     pub strokes: Vec<Stroke>,
-    pub active_ids: HashSet<String>,
-    pub owners: HashMap<String, Uuid>,
+    pub active_ids: HashSet<StrokeId>,
+    pub owners: HashMap<StrokeId, Uuid>,
     pub histories: HashMap<Uuid, ClientHistory>,
     pub peers: HashMap<Uuid, mpsc::UnboundedSender<yumboard_shared::ServerMessage>>,
     pub transform_sessions: HashMap<Uuid, TransformSession>,
@@ -48,7 +48,7 @@ pub enum Action {
 }
 
 pub struct TransformSession {
-    pub ids: Vec<String>,
+    pub ids: Vec<StrokeId>,
     pub before: Vec<Stroke>,
 }
 

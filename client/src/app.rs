@@ -11,7 +11,7 @@ use web_sys::{
     KeyboardEvent, MessageEvent, PointerEvent, ProgressEvent, WebSocket,
 };
 
-use yumboard_shared::{ClientMessage, Point, ServerMessage, Stroke, TransformOp};
+use yumboard_shared::{ClientMessage, Point, ServerMessage, Stroke, StrokeId, TransformOp};
 
 use crate::actions::{
     adopt_strokes, apply_transform_operation, apply_transformed_strokes, clear_board, end_stroke,
@@ -339,7 +339,7 @@ pub fn run() -> Result<(), JsValue> {
     web_sys::console::log_1(&format!("WS connecting url={ws_url}").into());
     let socket = Rc::new(WebSocket::new(&ws_url)?);
     web_sys::console::log_1(&format!("WS created ready_state={}", socket.ready_state()).into());
-    let pending_points = Rc::new(RefCell::new(HashMap::<String, Vec<Point>>::new()));
+    let pending_points = Rc::new(RefCell::new(HashMap::<StrokeId, Vec<Point>>::new()));
     let flush_scheduled = Rc::new(Cell::new(false));
     let active_draw_pointer: Rc<Cell<Option<i32>>> = Rc::new(Cell::new(None));
     let active_draw_timestamp = Rc::new(Cell::new(0.0));
@@ -1313,7 +1313,7 @@ pub fn run() -> Result<(), JsValue> {
                             return;
                         }
                     };
-                    let id = make_id();
+                    let id = StrokeId::new(make_id());
                     let color = down_color.value();
                     let size = sanitize_size(down_size.value_as_number() as f32);
 

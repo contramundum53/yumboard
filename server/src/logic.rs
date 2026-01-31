@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use yumboard_shared::{ClientMessage, Point, ServerMessage, Stroke, TransformOp};
+use yumboard_shared::{ClientMessage, Point, ServerMessage, Stroke, StrokeId, TransformOp};
 
 use crate::state::{Action, Session, TransformSession, MAX_POINTS_PER_STROKE, MAX_STROKES};
 
@@ -63,7 +63,12 @@ pub fn apply_client_message(
             if !session.active_ids.contains(&id) {
                 return None;
             }
-            if let Some(stroke) = session.strokes.iter_mut().find(|stroke| stroke.id == id) {
+            let id_ref = &id;
+            if let Some(stroke) = session
+                .strokes
+                .iter_mut()
+                .find(|stroke| &stroke.id == id_ref)
+            {
                 if stroke.points.len() < MAX_POINTS_PER_STROKE {
                     stroke.points.push(point);
 
@@ -82,7 +87,12 @@ pub fn apply_client_message(
             if !session.active_ids.contains(&id) {
                 return None;
             }
-            let Some(stroke) = session.strokes.iter_mut().find(|stroke| stroke.id == id) else {
+            let id_ref = &id;
+            let Some(stroke) = session
+                .strokes
+                .iter_mut()
+                .find(|stroke| &stroke.id == id_ref)
+            else {
                 return None;
             };
             if stroke.points.len() >= MAX_POINTS_PER_STROKE {
@@ -123,7 +133,7 @@ pub fn apply_client_message(
                     let stroke = session
                         .strokes
                         .iter()
-                        .find(|stroke| stroke.id == id)
+                        .find(|stroke| &stroke.id == &id)
                         .cloned();
                     if let Some(stroke) = stroke {
                         if let Some(history) = session.histories.get_mut(&sender) {
@@ -300,7 +310,9 @@ pub fn apply_client_message(
                 return None;
             }
 
-            let removed = if let Some(index) = session.strokes.iter().position(|s| s.id == id) {
+            let id_ref = &id;
+            let removed = if let Some(index) = session.strokes.iter().position(|s| &s.id == id_ref)
+            {
                 Some(session.strokes.remove(index))
             } else {
                 None
@@ -529,7 +541,7 @@ fn sanitize_stroke(mut stroke: Stroke) -> Option<Stroke> {
     Some(stroke)
 }
 
-fn sanitize_ids(ids: Vec<String>) -> Vec<String> {
+fn sanitize_ids(ids: Vec<StrokeId>) -> Vec<StrokeId> {
     let mut unique = HashSet::new();
     let mut result = Vec::new();
     for id in ids {
@@ -571,13 +583,13 @@ fn sanitize_transform_op(op: TransformOp) -> Option<TransformOp> {
     }
 }
 
-fn apply_transform(session: &mut Session, ids: &[String], op: &TransformOp) -> bool {
-    let id_set: HashSet<&str> = ids.iter().map(|id| id.as_str()).collect();
+fn apply_transform(session: &mut Session, ids: &[StrokeId], op: &TransformOp) -> bool {
+    let id_set: HashSet<&StrokeId> = ids.iter().collect();
     let mut changed = false;
     match *op {
         TransformOp::Translate { dx, dy } => {
             for stroke in &mut session.strokes {
-                if !id_set.contains(stroke.id.as_str()) {
+                if !id_set.contains(&stroke.id) {
                     continue;
                 }
                 changed = true;
@@ -591,7 +603,7 @@ fn apply_transform(session: &mut Session, ids: &[String], op: &TransformOp) -> b
             let cx = anchor.x as f64;
             let cy = anchor.y as f64;
             for stroke in &mut session.strokes {
-                if !id_set.contains(stroke.id.as_str()) {
+                if !id_set.contains(&stroke.id) {
                     continue;
                 }
                 changed = true;
@@ -609,7 +621,7 @@ fn apply_transform(session: &mut Session, ids: &[String], op: &TransformOp) -> b
             let cos = delta.cos();
             let sin = delta.sin();
             for stroke in &mut session.strokes {
-                if !id_set.contains(stroke.id.as_str()) {
+                if !id_set.contains(&stroke.id) {
                     continue;
                 }
                 changed = true;
@@ -625,8 +637,8 @@ fn apply_transform(session: &mut Session, ids: &[String], op: &TransformOp) -> b
     changed
 }
 
-fn remove_stroke(session: &mut Session, id: &str) -> bool {
-    let removed = if let Some(index) = session.strokes.iter().position(|s| s.id == id) {
+fn remove_stroke(session: &mut Session, id: &StrokeId) -> bool {
+    let removed = if let Some(index) = session.strokes.iter().position(|s| &s.id == id) {
         session.strokes.remove(index);
         true
     } else {
@@ -656,7 +668,8 @@ fn add_stroke(session: &mut Session, stroke: Stroke, owner: Option<Uuid>) {
 }
 
 fn replace_stroke(session: &mut Session, stroke: Stroke) -> Option<Stroke> {
-    if let Some(index) = session.strokes.iter().position(|s| s.id == stroke.id) {
+    let id = &stroke.id;
+    if let Some(index) = session.strokes.iter().position(|s| &s.id == id) {
         let before = session.strokes[index].clone();
         session.strokes[index] = stroke;
 
@@ -666,8 +679,8 @@ fn replace_stroke(session: &mut Session, stroke: Stroke) -> Option<Stroke> {
     }
 }
 
-fn remove_stroke_full(session: &mut Session, id: &str) -> Option<Stroke> {
-    let removed = if let Some(index) = session.strokes.iter().position(|s| s.id == id) {
+fn remove_stroke_full(session: &mut Session, id: &StrokeId) -> Option<Stroke> {
+    let removed = if let Some(index) = session.strokes.iter().position(|s| &s.id == id) {
         Some(session.strokes.remove(index))
     } else {
         None
