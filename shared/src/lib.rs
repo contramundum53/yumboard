@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
 #[serde(transparent)]
-pub struct StrokeId(pub String);
+pub struct StrokeId(String);
 
 impl StrokeId {
     pub fn new(value: String) -> Self {
