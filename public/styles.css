@@ -476,8 +476,8 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: auto;
-    height: auto;
+    width: 34px;
+    height: 160px;
   }
 
   .range-control::before {
@@ -485,29 +485,20 @@ body {
   }
 
   #size {
-    -webkit-appearance: auto;
-    appearance: auto;
     writing-mode: horizontal-tb;
-    direction: ltr;
-    transform: none;
-    width: 140px;
-    height: 28px;
+    transform: rotate(90deg);
+    transform-origin: center;
+    width: 130px;
+    height: 34px;
     margin: 0;
   }
 
   #size::-webkit-slider-runnable-track {
-    background: initial;
-    height: auto;
+    background-color: transparent;
+    background-image: none;
   }
 
   #size::-webkit-slider-thumb {
-    -webkit-appearance: auto;
-    width: auto;
-    height: auto;
-    border: none;
-    border-radius: 0;
-    background: initial;
-    box-shadow: none;
-    margin: 0;
+    margin-left: calc((34px - 18px) / 2);
   }
 }
