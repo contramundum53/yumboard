@@ -100,6 +100,23 @@ fn show_color_input(
     color_input.set_class_name("hidden-color active");
 }
 
+fn coalesced_pointer_events(event: &PointerEvent) -> Vec<PointerEvent> {
+    let events = event.get_coalesced_events();
+    if events.length() == 0 {
+        return vec![event.clone()];
+    }
+    let mut out = Vec::with_capacity(events.length() as usize);
+    for index in 0..events.length() {
+        if let Ok(event) = events.get(index).dyn_into::<PointerEvent>() {
+            out.push(event);
+        }
+    }
+    if out.is_empty() {
+        out.push(event.clone());
+    }
+    out
+}
+
 fn take_loading_previous(state: &mut State) -> Option<Mode> {
     let placeholder = Mode::Pan(PanMode::Idle);
     match std::mem::replace(&mut state.mode, placeholder) {
@@ -980,167 +997,173 @@ pub fn run() -> Result<(), JsValue> {
         let move_socket = socket.clone();
         let move_canvas = canvas.clone();
         let onmove = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
-            let (pan_x, pan_y, zoom) = {
-                let state = move_state.borrow();
-                (state.pan_x, state.pan_y, state.zoom)
-            };
-            let rect = move_canvas.get_bounding_client_rect();
-            let screen_x = event.client_x() as f64 - rect.left();
-            let screen_y = event.client_y() as f64 - rect.top();
-            let hit = {
-                let state = move_state.borrow();
-                match &state.mode {
-                    Mode::Select(select) => selection_hit_test(
-                        &state.strokes,
-                        select,
-                        state.zoom,
-                        state.pan_x,
-                        state.pan_y,
-                        screen_x,
-                        screen_y,
-                    ),
-                    _ => None,
-                }
-            };
-            let mut state = move_state.borrow_mut();
-            match &mut state.mode {
-                Mode::Select(select) => {
-                    let world_point = match event_to_point(&move_canvas, &event, pan_x, pan_y, zoom)
-                    {
-                        Some(point) => point,
-                        None => return,
-                    };
-                    match &mut select.mode {
-                        SelectMode::Lasso { points } => {
-                            points.push(world_point);
-                            redraw(&mut state);
-                        }
-                        SelectMode::Move { start, snapshot } => {
-                            let delta_x = world_point.x - start.x;
-                            let delta_y = world_point.y - start.y;
-                            let updated = apply_translation(snapshot, delta_x, delta_y);
-                            apply_transformed_strokes(&mut state, &updated);
-                            for stroke in updated {
-                                send_message(
-                                    &move_socket,
-                                    &ClientMessage::StrokeReplace { stroke },
-                                );
-                            }
-                        }
-                        SelectMode::Scale {
-                            anchor,
-                            start,
-                            axis,
-                            snapshot,
-                        } => {
-                            let dx0 = (start.x - anchor.x) as f64;
-                            let dy0 = (start.y - anchor.y) as f64;
-                            let dx1 = (world_point.x - anchor.x) as f64;
-                            let dy1 = (world_point.y - anchor.y) as f64;
-                            let (mut sx, mut sy) = match axis {
-                                ScaleAxis::Both => {
-                                    let denom = dx0 * dx0 + dy0 * dy0;
-                                    let scale = if denom > f64::EPSILON {
-                                        (dx1 * dx0 + dy1 * dy0) / denom
-                                    } else {
-                                        1.0
-                                    };
-                                    (scale, scale)
-                                }
-                                ScaleAxis::X => {
-                                    let scale = if dx0.abs() > f64::EPSILON {
-                                        dx1 / dx0
-                                    } else {
-                                        1.0
-                                    };
-                                    (scale, 1.0)
-                                }
-                                ScaleAxis::Y => {
-                                    let scale = if dy0.abs() > f64::EPSILON {
-                                        dy1 / dy0
-                                    } else {
-                                        1.0
-                                    };
-                                    (1.0, scale)
-                                }
+            for event in coalesced_pointer_events(&event) {
+                let (pan_x, pan_y, zoom) = {
+                    let state = move_state.borrow();
+                    (state.pan_x, state.pan_y, state.zoom)
+                };
+                let rect = move_canvas.get_bounding_client_rect();
+                let screen_x = event.client_x() as f64 - rect.left();
+                let screen_y = event.client_y() as f64 - rect.top();
+                let hit = {
+                    let state = move_state.borrow();
+                    match &state.mode {
+                        Mode::Select(select) => selection_hit_test(
+                            &state.strokes,
+                            select,
+                            state.zoom,
+                            state.pan_x,
+                            state.pan_y,
+                            screen_x,
+                            screen_y,
+                        ),
+                        _ => None,
+                    }
+                };
+                let mut state = move_state.borrow_mut();
+                match &mut state.mode {
+                    Mode::Select(select) => {
+                        let world_point =
+                            match event_to_point(&move_canvas, &event, pan_x, pan_y, zoom) {
+                                Some(point) => point,
+                                None => return,
                             };
-                            sx = clamp_scale(sx, 0.05);
-                            sy = clamp_scale(sy, 0.05);
-                            let updated = apply_scale_xy(snapshot, *anchor, sx, sy);
-                            apply_transformed_strokes(&mut state, &updated);
-                            for stroke in updated {
-                                send_message(
-                                    &move_socket,
-                                    &ClientMessage::StrokeReplace { stroke },
-                                );
+                        match &mut select.mode {
+                            SelectMode::Lasso { points } => {
+                                points.push(world_point);
+                                redraw(&mut state);
                             }
-                        }
-                        SelectMode::Rotate {
-                            center,
-                            start_angle,
-                            snapshot,
-                        } => {
-                            let angle = angle_between(*center, world_point);
-                            let delta = angle - *start_angle;
-                            let updated = apply_rotation(snapshot, *center, delta);
-                            apply_transformed_strokes(&mut state, &updated);
-                            for stroke in updated {
-                                send_message(
-                                    &move_socket,
-                                    &ClientMessage::StrokeReplace { stroke },
-                                );
+                            SelectMode::Move { start, snapshot } => {
+                                let delta_x = world_point.x - start.x;
+                                let delta_y = world_point.y - start.y;
+                                let updated = apply_translation(snapshot, delta_x, delta_y);
+                                apply_transformed_strokes(&mut state, &updated);
+                                for stroke in updated {
+                                    send_message(
+                                        &move_socket,
+                                        &ClientMessage::StrokeReplace { stroke },
+                                    );
+                                }
                             }
-                        }
-                        SelectMode::Idle => {
-                            if hit.is_some() {
-                                set_canvas_mode(&state.canvas, &state.mode, false);
+                            SelectMode::Scale {
+                                anchor,
+                                start,
+                                axis,
+                                snapshot,
+                            } => {
+                                let dx0 = (start.x - anchor.x) as f64;
+                                let dy0 = (start.y - anchor.y) as f64;
+                                let dx1 = (world_point.x - anchor.x) as f64;
+                                let dy1 = (world_point.y - anchor.y) as f64;
+                                let (mut sx, mut sy) = match axis {
+                                    ScaleAxis::Both => {
+                                        let denom = dx0 * dx0 + dy0 * dy0;
+                                        let scale = if denom > f64::EPSILON {
+                                            (dx1 * dx0 + dy1 * dy0) / denom
+                                        } else {
+                                            1.0
+                                        };
+                                        (scale, scale)
+                                    }
+                                    ScaleAxis::X => {
+                                        let scale = if dx0.abs() > f64::EPSILON {
+                                            dx1 / dx0
+                                        } else {
+                                            1.0
+                                        };
+                                        (scale, 1.0)
+                                    }
+                                    ScaleAxis::Y => {
+                                        let scale = if dy0.abs() > f64::EPSILON {
+                                            dy1 / dy0
+                                        } else {
+                                            1.0
+                                        };
+                                        (1.0, scale)
+                                    }
+                                };
+                                sx = clamp_scale(sx, 0.05);
+                                sy = clamp_scale(sy, 0.05);
+                                let updated = apply_scale_xy(snapshot, *anchor, sx, sy);
+                                apply_transformed_strokes(&mut state, &updated);
+                                for stroke in updated {
+                                    send_message(
+                                        &move_socket,
+                                        &ClientMessage::StrokeReplace { stroke },
+                                    );
+                                }
+                            }
+                            SelectMode::Rotate {
+                                center,
+                                start_angle,
+                                snapshot,
+                            } => {
+                                let angle = angle_between(*center, world_point);
+                                let delta = angle - *start_angle;
+                                let updated = apply_rotation(snapshot, *center, delta);
+                                apply_transformed_strokes(&mut state, &updated);
+                                for stroke in updated {
+                                    send_message(
+                                        &move_socket,
+                                        &ClientMessage::StrokeReplace { stroke },
+                                    );
+                                }
+                            }
+                            SelectMode::Idle => {
+                                if hit.is_some() {
+                                    set_canvas_mode(&state.canvas, &state.mode, false);
+                                }
                             }
                         }
                     }
-                }
-                Mode::Erase(EraseMode::Active { .. }) => {
-                    let point = match event_to_point(&move_canvas, &event, pan_x, pan_y, zoom) {
-                        Some(point) => point,
-                        None => return,
-                    };
-                    let removed_ids = erase_hits_at_point(&mut state, point);
-                    for id in removed_ids {
-                        send_message(&move_socket, &ClientMessage::Erase { id });
-                    }
-                }
-                Mode::Pan(PanMode::Active {
-                    start_x,
-                    start_y,
-                    origin_x,
-                    origin_y,
-                }) => {
-                    let next_pan_x = *origin_x + (event.client_x() as f64 - *start_x);
-                    let next_pan_y = *origin_y + (event.client_y() as f64 - *start_y);
-                    state.pan_x = next_pan_x;
-                    state.pan_y = next_pan_y;
-                    redraw(&mut state);
-                }
-                Mode::Draw(draw) => {
-                    let id = match &draw.mode {
-                        DrawMode::Drawing { id } => id.clone(),
-                        _ => return,
-                    };
-                    let point = match event_to_point(&move_canvas, &event, pan_x, pan_y, zoom) {
-                        Some(point) => point,
-                        None => return,
-                    };
-                    if let Some(last_point) = last_point_for_id(&state.strokes, &id) {
-                        if last_point == point {
-                            return;
+                    Mode::Erase(EraseMode::Active { .. }) => {
+                        let point = match event_to_point(&move_canvas, &event, pan_x, pan_y, zoom) {
+                            Some(point) => point,
+                            None => return,
+                        };
+                        let removed_ids = erase_hits_at_point(&mut state, point);
+                        for id in removed_ids {
+                            send_message(&move_socket, &ClientMessage::Erase { id });
                         }
                     }
-                    move_stroke(&mut state, &id, point);
-                    send_message(&move_socket, &ClientMessage::StrokeMove { id, point });
+                    Mode::Pan(PanMode::Active {
+                        start_x,
+                        start_y,
+                        origin_x,
+                        origin_y,
+                    }) => {
+                        let next_pan_x = *origin_x + (event.client_x() as f64 - *start_x);
+                        let next_pan_y = *origin_y + (event.client_y() as f64 - *start_y);
+                        state.pan_x = next_pan_x;
+                        state.pan_y = next_pan_y;
+                        redraw(&mut state);
+                    }
+                    Mode::Draw(draw) => {
+                        let id = match &draw.mode {
+                            DrawMode::Drawing { id } => id.clone(),
+                            _ => return,
+                        };
+                        let point = match event_to_point(&move_canvas, &event, pan_x, pan_y, zoom) {
+                            Some(point) => point,
+                            None => return,
+                        };
+                        if let Some(last_point) = last_point_for_id(&state.strokes, &id) {
+                            if last_point == point {
+                                return;
+                            }
+                        }
+                        move_stroke(&mut state, &id, point);
+                        send_message(&move_socket, &ClientMessage::StrokeMove { id, point });
+                    }
+                    _ => {}
                 }
-                _ => {}
             }
         });
         canvas.add_event_listener_with_callback("pointermove", onmove.as_ref().unchecked_ref())?;
+        canvas.add_event_listener_with_callback(
+            "pointerrawupdate",
+            onmove.as_ref().unchecked_ref(),
+        )?;
         onmove.forget();
     }
 
