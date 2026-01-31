@@ -95,6 +95,17 @@ fn append_query_param(url: &str, key: &str, value: &str) -> String {
     format!("{url}{sep}{key}={value}")
 }
 
+fn http_probe_url_from_ws_url(ws_url: &str) -> Option<String> {
+    let base = if let Some(rest) = ws_url.strip_prefix("wss://") {
+        format!("https://{rest}")
+    } else if let Some(rest) = ws_url.strip_prefix("ws://") {
+        format!("http://{rest}")
+    } else {
+        return None;
+    };
+    Some(append_query_param(&base, "probe", "1"))
+}
+
 fn server_message_kind(message: &ServerMessage) -> &'static str {
     match message {
         ServerMessage::Sync { .. } => "sync",
@@ -518,6 +529,10 @@ pub fn run() -> Result<(), JsValue> {
         let ws_url = ws_url.clone();
         let ws_open_reported = ws_open_reported.clone();
         let document_cb = document.clone();
+        let window_cb = window.clone();
+        let probe_fired = Rc::new(Cell::new(false));
+        let probe_fired_cb = probe_fired.clone();
+        let debug = debug;
         let ontimeout = Closure::<dyn FnMut()>::new(move || {
             if socket.ready_state() == WebSocket::CONNECTING {
                 let hidden = document_hidden(&document_cb);
@@ -531,6 +546,43 @@ pub fn run() -> Result<(), JsValue> {
                     )
                     .into(),
                 );
+
+                if debug && !probe_fired_cb.replace(true) {
+                    if let Some(probe_url) = http_probe_url_from_ws_url(&ws_url) {
+                        web_sys::console::log_1(
+                            &format!("WS probe fetch start url={probe_url}").into(),
+                        );
+                        let promise = window_cb.fetch_with_str(&probe_url);
+
+                        let probe_url_ok = probe_url.clone();
+                        let on_ok = Closure::<dyn FnMut(JsValue)>::new(move |value: JsValue| {
+                            let status = Reflect::get(&value, &JsValue::from_str("status"))
+                                .ok()
+                                .and_then(|v| v.as_f64());
+                            let ok = Reflect::get(&value, &JsValue::from_str("ok"))
+                                .ok()
+                                .and_then(|v| v.as_bool());
+                            web_sys::console::log_1(
+                                &format!(
+                                    "WS probe fetch ok url={probe_url_ok} status={status:?} ok={ok:?}"
+                                )
+                                .into(),
+                            );
+                        });
+
+                        let probe_url_err = probe_url.clone();
+                        let on_err = Closure::<dyn FnMut(JsValue)>::new(move |err: JsValue| {
+                            web_sys::console::error_2(
+                                &format!("WS probe fetch error url={probe_url_err}").into(),
+                                &err,
+                            );
+                        });
+
+                        let _ = promise.then2(&on_ok, &on_err);
+                        on_ok.forget();
+                        on_err.forget();
+                    }
+                }
             }
         });
         let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
