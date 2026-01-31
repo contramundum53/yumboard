@@ -6,6 +6,7 @@ use axum::http::header::{CACHE_CONTROL, EXPIRES, PRAGMA};
 use axum::http::HeaderValue;
 use axum::routing::get;
 use axum::Router;
+use axum_server::tls_rustls::RustlsConfig;
 use clap::Parser;
 use tower_http::services::ServeDir;
 use tower_http::set_header::SetResponseHeaderLayer;
@@ -29,6 +30,14 @@ struct Args {
     // Directory to serve static files from
     #[arg(long)]
     public_dir: Option<PathBuf>,
+
+    // PEM certificate for HTTPS (mkcert outputs .pem files)
+    #[arg(long)]
+    tls_cert: Option<PathBuf>,
+
+    // PEM private key for HTTPS (mkcert outputs -key.pem files)
+    #[arg(long)]
+    tls_key: Option<PathBuf>,
 
     // Interval (in seconds) for periodic backups
     #[arg(long, default_value_t = 60u64)]
@@ -148,10 +157,27 @@ async fn main() {
     });
 
     let addr = SocketAddr::from(([0, 0, 0, 0], args.port));
-    println!("Whiteboard running at http://localhost:{}", args.port);
-
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .expect("Failed to bind server");
-    axum::serve(listener, app).await.expect("Server crashed");
+    let use_tls = args.tls_cert.is_some() || args.tls_key.is_some();
+    if use_tls {
+        let cert = args
+            .tls_cert
+            .expect("Missing --tls-cert (required when enabling TLS)");
+        let key = args
+            .tls_key
+            .expect("Missing --tls-key (required when enabling TLS)");
+        println!("Whiteboard running at https://localhost:{}", args.port);
+        let config = RustlsConfig::from_pem_file(cert, key)
+            .await
+            .expect("Failed to load TLS certificate/key");
+        axum_server::bind_rustls(addr, config)
+            .serve(app.into_make_service())
+            .await
+            .expect("Server crashed");
+    } else {
+        println!("Whiteboard running at http://localhost:{}", args.port);
+        let listener = tokio::net::TcpListener::bind(addr)
+            .await
+            .expect("Failed to bind server");
+        axum::serve(listener, app).await.expect("Server crashed");
+    }
 }
