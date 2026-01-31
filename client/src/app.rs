@@ -118,17 +118,12 @@ fn coalesced_pointer_events(event: &PointerEvent) -> Vec<PointerEvent> {
         return vec![event.clone()];
     };
 
-    if events.length() == 0 {
-        return vec![event.clone()];
-    }
-
     let mut out = Vec::with_capacity(events.length() as usize + 1);
     for index in 0..events.length() {
         if let Ok(event) = events.get(index).dyn_into::<PointerEvent>() {
             out.push(event);
         }
     }
-    out.push(event.clone());
     out
 }
 
@@ -234,6 +229,7 @@ pub fn run() -> Result<(), JsValue> {
         }),
         touch_points: HashMap::new(),
         pinch: None,
+        touch_pan: None,
     }));
 
     update_size_label(&size_input, &size_value);
@@ -935,7 +931,7 @@ pub fn run() -> Result<(), JsValue> {
                     return;
                 }
                 if state.touch_points.len() == 1 {
-                    state.mode = Mode::Pan(PanMode::Active {
+                    state.touch_pan = Some(PanMode::Active {
                         start_x: event.client_x() as f64,
                         start_y: event.client_y() as f64,
                         origin_x: state.pan_x,
@@ -1165,6 +1161,23 @@ pub fn run() -> Result<(), JsValue> {
                             redraw(&mut state);
                             continue;
                         }
+                        state.pinch = None;
+                    }
+                    if state.touch_points.len() == 1 {
+                        if let Some(PanMode::Active {
+                            start_x,
+                            start_y,
+                            origin_x,
+                            origin_y,
+                        }) = state.touch_pan
+                        {
+                            let next_pan_x = origin_x + (event.client_x() as f64 - start_x);
+                            let next_pan_y = origin_y + (event.client_y() as f64 - start_y);
+                            state.pan_x = next_pan_x;
+                            state.pan_y = next_pan_y;
+                            redraw(&mut state);
+                            continue;
+                        }
                     }
                 }
                 let (pan_x, pan_y, zoom) = {
@@ -1348,6 +1361,9 @@ pub fn run() -> Result<(), JsValue> {
                 state.touch_points.remove(&event.pointer_id());
                 if state.touch_points.len() < 2 {
                     state.pinch = None;
+                }
+                if state.touch_points.is_empty() {
+                    state.touch_pan = None;
                 }
             }
             let active = matches!(

@@ -115,6 +115,7 @@ pub struct State {
     pub mode: Mode,
     pub touch_points: HashMap<i32, (f64, f64)>,
     pub pinch: Option<PinchState>,
+    pub touch_pan: Option<PanMode>,
 }
 
 impl State {}
