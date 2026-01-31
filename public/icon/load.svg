@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <svg baseProfile="tiny" height="1024" version="1.2" viewBox="0 0 1024 1024" width="1024" xmlns="http://www.w3.org/2000/svg">
-  <path d="M256 736 L256 320 L608 320 L768 480 L768 736 Z" fill="none" stroke="black" stroke-linejoin="round" stroke-width="64"/>
-  <path d="M608 320 L608 480 L768 480" fill="none" stroke="black" stroke-linejoin="round" stroke-width="64"/>
-  <path d="M512 608 L512 416 M512 416 L448 480 M512 416 L576 480" fill="none" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="64"/>
+  <path d="M256 736 L768 736" fill="none" stroke="black" stroke-linecap="round" stroke-width="64"/>
+  <path d="M512 640 L512 288 M512 288 L416 384 M512 288 L608 384" fill="none" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="64"/>
 </svg>
