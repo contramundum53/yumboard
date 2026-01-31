@@ -1,2 +1,3 @@
 Plwase always try building your change, and fix any compilation errors if there are. After confirming that it builds, format with `cargo fmt` and commit the changes with a concise commit message.
 If you see any files that you didn't change coming in in `git status`, leave it as it is.
+Don't care even if the git branch is on detached head.
