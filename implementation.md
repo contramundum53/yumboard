@@ -23,7 +23,9 @@ project is structured, how state flows, and where to extend it.
 
 Defined in `shared/src/lib.rs`:
 
-- `Stroke { id: String, color: String, size: f32, points: Vec<Point> }`
+- `Stroke { id: StrokeId, color: Color, size: f32, points: Vec<Point> }`
+- `StrokeId` is a random `[u64; 2]` (serde transparent).
+- `Color { r: u8, g: u8, b: u8, a: u8 }` (parsed from hex in the client).
 - `Point { x: f32, y: f32 }`
 
 Important: points are in *world coordinates* (not canvas pixels). The client interprets world
@@ -50,7 +52,9 @@ Line thickness is also scaled by zoom:
 
 ## Network Protocol (WebSocket)
 
-All messages are JSON (serde) and defined in `shared/src/lib.rs`.
+Messages are encoded with `bincode` (v2) for the live websocket stream; the server still accepts
+JSON text frames for debugging/backward-compatibility. All message types are defined in
+`shared/src/lib.rs`.
 
 ### Session URL Scheme
 
@@ -69,6 +73,7 @@ The client computes the WS URL at runtime (`client/src/net.rs:websocket_url`) us
 - `stroke:remove`: delete a stroke by id.
 - `stroke:restore`: restore a whole stroke (used for undo/redo + clear undo).
 - `stroke:replace`: replace a stroke with the same id (used for transforms).
+- `transform:update { ids, op }`: incremental transform updates (translate/scale/rotate deltas).
 - `clear`: clear all strokes.
 
 ### Client -> Server
@@ -76,7 +81,7 @@ The client computes the WS URL at runtime (`client/src/net.rs:websocket_url`) us
 - `stroke:start`, `stroke:points`, `stroke:end`: draw a stroke.
 - `erase { id }`: erase a stroke by id (eraser tool).
 - `remove { ids }`: delete multiple strokes (selection delete/trash).
-- `stroke:replace { stroke }`: mutate stroke geometry (selection move/scale/rotate).
+- `transform:update { ids, op }`: incremental transform updates (selection move/scale/rotate).
 - `transform:start { ids }` / `transform:end { ids }`: brackets a transform so undo/redo treats it
   as one action.
 - `clear`, `undo`, `redo`, `load { strokes }`
@@ -140,7 +145,7 @@ Undo/redo is owned by the server to ensure a client cannot undo other people’s
 
 Transform grouping:
 
-- Client sends `transform:start { ids }` before first `stroke:replace` in a drag.
+- Client sends `transform:start { ids }` before first `transform:update` in a drag.
 - Client sends `transform:end { ids }` on pointer-up/cancel.
 - Server snapshots `before` at start and stores it in `transform_sessions`; at end it records a
   single `Action::Transform { before, after }`.
@@ -215,8 +220,7 @@ pan does not permanently “steal” the pen tool).
 - Lasso path is built on pointer-move and rendered as dashed line.
 - On pointer-up, lasso selects *whole strokes* (by id) if *any point* of the stroke is inside the
   polygon (`client/src/actions.rs:finalize_lasso_selection`).
-- Dragging handles emits `stroke:replace` updates for each stroke in real time, so all peers see
-  transforms live.
+- Dragging handles emits `transform:update` ops in real time, so all peers see transforms live.
 - Corner scaling keeps aspect ratio; edge scaling is axis-locked.
 - Scaling is anchored at the opposite corner/side (selected handle determines anchor).
 
