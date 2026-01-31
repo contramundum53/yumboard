@@ -15,7 +15,7 @@ use yumboard_shared::{ClientMessage, Point, ServerMessage, Stroke, StrokeId, Tra
 
 use crate::actions::{
     adopt_strokes, apply_transform_operation, apply_transformed_strokes, clear_board, end_stroke,
-    erase_hits_at_point, finalize_lasso_selection, move_stroke, remove_stroke,
+    erase_hits_at_point, finalize_lasso_selection, move_stroke, parse_color, remove_stroke,
     replace_stroke_local, restore_stroke, sanitize_size, start_stroke,
 };
 use crate::dom::{
@@ -1427,7 +1427,7 @@ pub fn run() -> Result<(), JsValue> {
                         }
                     };
                     let id = make_id();
-                    let color = down_color.value();
+                    let color = parse_color(&down_color.value());
                     let size = sanitize_size(down_size.value_as_number() as f32);
 
                     down_active_draw_pointer.set(Some(event.pointer_id()));

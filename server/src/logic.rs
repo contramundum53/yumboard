@@ -21,11 +21,10 @@ pub fn apply_client_message(
             point,
         } => {
             let point = normalize_point(point)?;
-            let color = sanitize_color(color);
             let size = sanitize_size(size);
             let stroke = Stroke {
                 id: id.clone(),
-                color: color.clone(),
+                color,
                 size,
                 points: vec![point],
             };
@@ -490,23 +489,12 @@ fn normalize_point(point: Point) -> Option<Point> {
     Some(point)
 }
 
-fn sanitize_color(mut color: String) -> String {
-    if color.is_empty() {
-        return "#1f1f1f".to_string();
-    }
-    if color.len() > 32 {
-        color.truncate(32);
-    }
-    color
-}
-
 fn sanitize_size(size: f32) -> f32 {
     let size = if size.is_finite() { size } else { 6.0 };
     size.max(1.0).min(60.0)
 }
 
 fn sanitize_stroke(mut stroke: Stroke) -> Option<Stroke> {
-    stroke.color = sanitize_color(stroke.color);
     stroke.size = sanitize_size(stroke.size);
     stroke.points = stroke
         .points

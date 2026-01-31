@@ -32,9 +32,56 @@ fn clamp_unit(value: f32) -> f32 {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Stroke {
     pub id: StrokeId,
-    pub color: String,
+    pub color: Color,
     pub size: f32,
     pub points: Vec<Point>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Color {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
+}
+
+impl Color {
+    pub const DEFAULT: Color = Color {
+        r: 0x1f,
+        g: 0x1f,
+        b: 0x1f,
+        a: 0xff,
+    };
+
+    pub fn from_hex(input: &str) -> Option<Color> {
+        let trimmed = input.trim();
+        let hex = trimmed.strip_prefix('#').unwrap_or(trimmed);
+        match hex.len() {
+            3 => {
+                let r = u8::from_str_radix(&hex[0..1], 16).ok()?;
+                let g = u8::from_str_radix(&hex[1..2], 16).ok()?;
+                let b = u8::from_str_radix(&hex[2..3], 16).ok()?;
+                Some(Color {
+                    r: (r << 4) | r,
+                    g: (g << 4) | g,
+                    b: (b << 4) | b,
+                    a: 0xff,
+                })
+            }
+            6 => {
+                let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+                let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+                let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+                Some(Color { r, g, b, a: 0xff })
+            }
+            _ => None,
+        }
+    }
+
+    pub fn to_rgba_css(self) -> String {
+        let alpha = self.a as f32 / 255.0;
+        format!("rgba({}, {}, {}, {})", self.r, self.g, self.b, alpha)
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -54,7 +101,7 @@ pub enum ClientMessage {
     #[serde(rename = "stroke:start")]
     StrokeStart {
         id: StrokeId,
-        color: String,
+        color: Color,
         size: f32,
         point: Point,
     },
@@ -98,7 +145,7 @@ pub enum ServerMessage {
     #[serde(rename = "stroke:start")]
     StrokeStart {
         id: StrokeId,
-        color: String,
+        color: Color,
         size: f32,
         point: Point,
     },

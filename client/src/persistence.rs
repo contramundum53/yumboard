@@ -74,7 +74,7 @@ pub fn build_pdf_html(state: &State, include_background: bool) -> String {
                 data.push_str(&format!(" L {} {}", x, y));
             }
         }
-        let color = stroke.color.clone();
+        let color = stroke.color.to_rgba_css();
         let width = stroke.size as f64 * STROKE_UNIT;
         paths.push_str(&format!(
             "<path d=\"{}\" stroke=\"{}\" stroke-width=\"{}\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\" />",

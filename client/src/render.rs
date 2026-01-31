@@ -1,5 +1,5 @@
 use web_sys::CanvasRenderingContext2d;
-use yumboard_shared::{Point, Stroke};
+use yumboard_shared::{Color, Point, Stroke};
 
 use crate::geometry::{selection_bounds, world_to_screen};
 use crate::state::{Mode, SelectMode, SelectState, State, STROKE_UNIT};
@@ -10,14 +10,14 @@ pub fn draw_dot(
     pan_x: f64,
     pan_y: f64,
     point: Point,
-    color: &str,
+    color: Color,
     size: f32,
 ) {
     let scale = zoom;
     let weight = size as f64 * zoom * STROKE_UNIT;
     let x = point.x as f64 * scale + pan_x;
     let y = point.y as f64 * scale + pan_y;
-    ctx.set_fill_style_str(color);
+    ctx.set_fill_style_str(&color.to_rgba_css());
     ctx.begin_path();
     let _ = ctx.arc(x, y, weight / 2.0, 0.0, std::f64::consts::PI * 2.0);
     ctx.fill();
@@ -30,7 +30,7 @@ pub fn draw_segment(
     pan_y: f64,
     from: Point,
     to: Point,
-    color: &str,
+    color: Color,
     size: f32,
 ) {
     let scale = zoom;
@@ -40,7 +40,7 @@ pub fn draw_segment(
     let to_x = to.x as f64 * scale + pan_x;
     let to_y = to.y as f64 * scale + pan_y;
 
-    ctx.set_stroke_style_str(color);
+    ctx.set_stroke_style_str(&color.to_rgba_css());
     ctx.set_line_cap("round");
     ctx.set_line_join("round");
     ctx.set_line_width(weight);
@@ -61,7 +61,7 @@ pub fn draw_stroke(state: &State, stroke: &Stroke) {
             state.pan_x,
             state.pan_y,
             stroke.points[0],
-            &stroke.color,
+            stroke.color,
             stroke.size,
         );
         return;
@@ -74,7 +74,7 @@ pub fn draw_stroke(state: &State, stroke: &Stroke) {
             state.pan_y,
             stroke.points[i - 1],
             stroke.points[i],
-            &stroke.color,
+            stroke.color,
             stroke.size,
         );
     }

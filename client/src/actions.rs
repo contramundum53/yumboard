@@ -1,19 +1,13 @@
 use std::collections::HashSet;
 
-use yumboard_shared::{Point, Stroke, StrokeId, TransformOp};
+use yumboard_shared::{Color, Point, Stroke, StrokeId, TransformOp};
 
 use crate::geometry::{home_zoom_pan, normalize_point, stroke_hit};
 use crate::render::{draw_dot, draw_segment, redraw};
 use crate::state::{EraseMode, Mode, SelectMode, State};
 
-pub fn sanitize_color(mut color: String) -> String {
-    if color.is_empty() {
-        return "#1f1f1f".to_string();
-    }
-    if color.len() > 32 {
-        color.truncate(32);
-    }
-    color
+pub fn parse_color(input: &str) -> Color {
+    Color::from_hex(input).unwrap_or(Color::DEFAULT)
 }
 
 pub fn sanitize_size(size: f32) -> f32 {
@@ -21,12 +15,11 @@ pub fn sanitize_size(size: f32) -> f32 {
     size.max(1.0).min(60.0)
 }
 
-pub fn start_stroke(state: &mut State, id: StrokeId, color: String, size: f32, point: Point) {
+pub fn start_stroke(state: &mut State, id: StrokeId, color: Color, size: f32, point: Point) {
     let point = match normalize_point(point) {
         Some(point) => point,
         None => return,
     };
-    let color = sanitize_color(color);
     let size = sanitize_size(size);
     let stroke = Stroke {
         id: id.clone(),
@@ -42,7 +35,7 @@ pub fn start_stroke(state: &mut State, id: StrokeId, color: String, size: f32, p
         state.pan_x,
         state.pan_y,
         point,
-        &color,
+        color,
         size,
     );
 }
@@ -81,7 +74,7 @@ pub fn move_stroke(state: &mut State, id: &StrokeId, point: Point) -> bool {
                 state.pan_x,
                 state.pan_y,
                 to,
-                &color,
+                color,
                 size,
             );
         } else {
@@ -92,7 +85,7 @@ pub fn move_stroke(state: &mut State, id: &StrokeId, point: Point) -> bool {
                 state.pan_y,
                 from,
                 to,
-                &color,
+                color,
                 size,
             );
         }
