@@ -170,6 +170,7 @@ async fn main() {
             .await
             .expect("Failed to load TLS certificate/key");
         axum_server::bind_rustls(addr, config)
+            .http1_only()
             .serve(app.into_make_service())
             .await
             .expect("Server crashed");
