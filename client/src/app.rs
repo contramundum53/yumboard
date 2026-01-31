@@ -11,12 +11,12 @@ use web_sys::{
     PointerEvent, ProgressEvent, WebSocket,
 };
 
-use yumboard_shared::{ClientMessage, Point, ServerMessage, Stroke};
+use yumboard_shared::{ClientMessage, Point, ServerMessage, Stroke, TransformOp};
 
 use crate::actions::{
-    adopt_strokes, apply_transformed_strokes, clear_board, end_stroke, erase_hits_at_point,
-    finalize_lasso_selection, move_stroke, remove_stroke, replace_stroke_local, restore_stroke,
-    sanitize_size, start_stroke,
+    adopt_strokes, apply_transform_operation, apply_transformed_strokes, clear_board, end_stroke,
+    erase_hits_at_point, finalize_lasso_selection, move_stroke, remove_stroke,
+    replace_stroke_local, restore_stroke, sanitize_size, start_stroke,
 };
 use crate::dom::{
     event_to_point, get_element, resize_canvas, set_canvas_mode, set_status, set_tool_button,
@@ -397,6 +397,10 @@ pub fn run() -> Result<(), JsValue> {
                 }
                 ServerMessage::StrokeReplace { stroke } => {
                     replace_stroke_local(&mut state, stroke);
+                    redraw(&mut state);
+                }
+                ServerMessage::TransformUpdate { ids, op } => {
+                    apply_transform_operation(&mut state, &ids, &op);
                     redraw(&mut state);
                 }
             }
@@ -1042,6 +1046,7 @@ pub fn run() -> Result<(), JsValue> {
                                         center,
                                         start_angle: angle_between(center, world_point),
                                         snapshot,
+                                        last_delta: 0.0,
                                     };
                                     let ids = selection_ids.clone();
                                     if !ids.is_empty() {
@@ -1061,6 +1066,8 @@ pub fn run() -> Result<(), JsValue> {
                                         start: world_point,
                                         axis: handle.axis,
                                         snapshot,
+                                        last_sx: 1.0,
+                                        last_sy: 1.0,
                                     };
                                     let ids = selection_ids.clone();
                                     if !ids.is_empty() {
@@ -1075,6 +1082,8 @@ pub fn run() -> Result<(), JsValue> {
                                 select.mode = SelectMode::Move {
                                     start: world_point,
                                     snapshot,
+                                    last_dx: 0.0,
+                                    last_dy: 0.0,
                                 };
                                 let ids = selection_ids.clone();
                                 if !ids.is_empty() {
@@ -1248,28 +1257,47 @@ pub fn run() -> Result<(), JsValue> {
                                 Some(point) => point,
                                 None => continue,
                             };
+                        let selected_ids = select.selected_ids.clone();
+                        let mut pending_update: Option<Vec<Stroke>> = None;
+                        let mut pending_message: Option<ClientMessage> = None;
                         match &mut select.mode {
                             SelectMode::Lasso { points } => {
                                 points.push(world_point);
                                 redraw(&mut state);
                             }
-                            SelectMode::Move { start, snapshot } => {
+                            SelectMode::Move {
+                                start,
+                                snapshot,
+                                last_dx,
+                                last_dy,
+                            } => {
                                 let delta_x = world_point.x - start.x;
                                 let delta_y = world_point.y - start.y;
                                 let updated = apply_translation(snapshot, delta_x, delta_y);
-                                apply_transformed_strokes(&mut state, &updated);
-                                for stroke in updated {
-                                    send_message(
-                                        &move_socket,
-                                        &ClientMessage::StrokeReplace { stroke },
-                                    );
+                                let step_dx = delta_x - *last_dx;
+                                let step_dy = delta_y - *last_dy;
+                                if (step_dx.abs() > f32::EPSILON || step_dy.abs() > f32::EPSILON)
+                                    && !selected_ids.is_empty()
+                                {
+                                    pending_message = Some(ClientMessage::TransformUpdate {
+                                        ids: selected_ids.clone(),
+                                        op: TransformOp::Translate {
+                                            dx: step_dx as f64,
+                                            dy: step_dy as f64,
+                                        },
+                                    });
                                 }
+                                *last_dx = delta_x;
+                                *last_dy = delta_y;
+                                pending_update = Some(updated);
                             }
                             SelectMode::Scale {
                                 anchor,
                                 start,
                                 axis,
                                 snapshot,
+                                last_sx,
+                                last_sy,
                             } => {
                                 let dx0 = (start.x - anchor.x) as f64;
                                 let dy0 = (start.y - anchor.y) as f64;
@@ -1305,35 +1333,67 @@ pub fn run() -> Result<(), JsValue> {
                                 sx = clamp_scale(sx, 0.05);
                                 sy = clamp_scale(sy, 0.05);
                                 let updated = apply_scale_xy(snapshot, *anchor, sx, sy);
-                                apply_transformed_strokes(&mut state, &updated);
-                                for stroke in updated {
-                                    send_message(
-                                        &move_socket,
-                                        &ClientMessage::StrokeReplace { stroke },
-                                    );
+                                let step_sx = if last_sx.abs() > f64::EPSILON {
+                                    sx / *last_sx
+                                } else {
+                                    sx
+                                };
+                                let step_sy = if last_sy.abs() > f64::EPSILON {
+                                    sy / *last_sy
+                                } else {
+                                    sy
+                                };
+                                if (step_sx - 1.0).abs() > f64::EPSILON
+                                    || (step_sy - 1.0).abs() > f64::EPSILON
+                                {
+                                    if !selected_ids.is_empty() {
+                                        pending_message = Some(ClientMessage::TransformUpdate {
+                                            ids: selected_ids.clone(),
+                                            op: TransformOp::Scale {
+                                                anchor: *anchor,
+                                                sx: step_sx,
+                                                sy: step_sy,
+                                            },
+                                        });
+                                    }
                                 }
+                                *last_sx = sx;
+                                *last_sy = sy;
+                                pending_update = Some(updated);
                             }
                             SelectMode::Rotate {
                                 center,
                                 start_angle,
                                 snapshot,
+                                last_delta,
                             } => {
                                 let angle = angle_between(*center, world_point);
                                 let delta = angle - *start_angle;
                                 let updated = apply_rotation(snapshot, *center, delta);
-                                apply_transformed_strokes(&mut state, &updated);
-                                for stroke in updated {
-                                    send_message(
-                                        &move_socket,
-                                        &ClientMessage::StrokeReplace { stroke },
-                                    );
+                                let step_delta = delta - *last_delta;
+                                if step_delta.abs() > f64::EPSILON && !selected_ids.is_empty() {
+                                    pending_message = Some(ClientMessage::TransformUpdate {
+                                        ids: selected_ids.clone(),
+                                        op: TransformOp::Rotate {
+                                            center: *center,
+                                            delta: step_delta,
+                                        },
+                                    });
                                 }
+                                *last_delta = delta;
+                                pending_update = Some(updated);
                             }
                             SelectMode::Idle => {
                                 if hit.is_some() {
                                     set_canvas_mode(&state.canvas, &state.mode, false);
                                 }
                             }
+                        }
+                        if let Some(updated) = pending_update {
+                            apply_transformed_strokes(&mut state, &updated);
+                        }
+                        if let Some(message) = pending_message {
+                            send_message(&move_socket, &message);
                         }
                     }
                     Mode::Erase(EraseMode::Active { .. }) => {

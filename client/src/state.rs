@@ -61,17 +61,22 @@ pub enum SelectMode {
     Move {
         start: Point,
         snapshot: Vec<Stroke>,
+        last_dx: f32,
+        last_dy: f32,
     },
     Scale {
         anchor: Point,
         start: Point,
         axis: ScaleAxis,
         snapshot: Vec<Stroke>,
+        last_sx: f64,
+        last_sy: f64,
     },
     Rotate {
         center: Point,
         start_angle: f64,
         snapshot: Vec<Stroke>,
+        last_delta: f64,
     },
 }
 

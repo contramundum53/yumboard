@@ -28,6 +28,17 @@ pub struct Stroke {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(tag = "op")]
+pub enum TransformOp {
+    #[serde(rename = "translate")]
+    Translate { dx: f64, dy: f64 },
+    #[serde(rename = "scale")]
+    Scale { anchor: Point, sx: f64, sy: f64 },
+    #[serde(rename = "rotate")]
+    Rotate { center: Point, delta: f64 },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "type")]
 pub enum ClientMessage {
     #[serde(rename = "stroke:start")]
@@ -53,6 +64,12 @@ pub enum ClientMessage {
     Erase { id: String },
     #[serde(rename = "stroke:replace")]
     StrokeReplace { stroke: Stroke },
+    #[serde(rename = "transform:update")]
+    TransformUpdate {
+        ids: Vec<String>,
+        #[serde(flatten)]
+        op: TransformOp,
+    },
     #[serde(rename = "transform:start")]
     TransformStart { ids: Vec<String> },
     #[serde(rename = "transform:end")]
@@ -89,4 +106,10 @@ pub enum ServerMessage {
     StrokeRestore { stroke: Stroke },
     #[serde(rename = "stroke:replace")]
     StrokeReplace { stroke: Stroke },
+    #[serde(rename = "transform:update")]
+    TransformUpdate {
+        ids: Vec<String>,
+        #[serde(flatten)]
+        op: TransformOp,
+    },
 }

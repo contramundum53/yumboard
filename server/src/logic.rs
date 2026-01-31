@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use yumboard_shared::{ClientMessage, Point, ServerMessage, Stroke};
+use yumboard_shared::{ClientMessage, Point, ServerMessage, Stroke, TransformOp};
 
 use crate::state::{Action, Session, TransformSession, MAX_POINTS_PER_STROKE, MAX_STROKES};
 
@@ -334,6 +334,25 @@ pub fn apply_client_message(
             }
             Some((vec![ServerMessage::StrokeReplace { stroke }], false))
         }
+        ClientMessage::TransformUpdate { ids, op } => {
+            let session_ids = match session.transform_sessions.get(&sender) {
+                Some(session_info) => session_info.ids.clone(),
+                None => return None,
+            };
+            let mut ids = sanitize_ids(ids);
+            if ids.is_empty() {
+                return None;
+            }
+            ids.retain(|id| session_ids.iter().any(|session_id| session_id == id));
+            if ids.is_empty() {
+                return None;
+            }
+            let op = sanitize_transform_op(op)?;
+            if !apply_transform(session, &ids, &op) {
+                return None;
+            }
+            Some((vec![ServerMessage::TransformUpdate { ids, op }], false))
+        }
         ClientMessage::TransformStart { ids } => {
             let ids = sanitize_ids(ids);
             if ids.is_empty() {
@@ -522,6 +541,88 @@ fn sanitize_ids(ids: Vec<String>) -> Vec<String> {
         }
     }
     result
+}
+
+fn sanitize_transform_op(op: TransformOp) -> Option<TransformOp> {
+    match op {
+        TransformOp::Translate { dx, dy } => {
+            if dx.is_finite() && dy.is_finite() {
+                Some(TransformOp::Translate { dx, dy })
+            } else {
+                None
+            }
+        }
+        TransformOp::Scale { anchor, sx, sy } => {
+            let anchor = normalize_point(anchor)?;
+            if sx.is_finite() && sy.is_finite() {
+                Some(TransformOp::Scale { anchor, sx, sy })
+            } else {
+                None
+            }
+        }
+        TransformOp::Rotate { center, delta } => {
+            let center = normalize_point(center)?;
+            if delta.is_finite() {
+                Some(TransformOp::Rotate { center, delta })
+            } else {
+                None
+            }
+        }
+    }
+}
+
+fn apply_transform(session: &mut Session, ids: &[String], op: &TransformOp) -> bool {
+    let id_set: HashSet<&str> = ids.iter().map(|id| id.as_str()).collect();
+    let mut changed = false;
+    match *op {
+        TransformOp::Translate { dx, dy } => {
+            for stroke in &mut session.strokes {
+                if !id_set.contains(stroke.id.as_str()) {
+                    continue;
+                }
+                changed = true;
+                for point in &mut stroke.points {
+                    point.x = (point.x as f64 + dx) as f32;
+                    point.y = (point.y as f64 + dy) as f32;
+                }
+            }
+        }
+        TransformOp::Scale { anchor, sx, sy } => {
+            let cx = anchor.x as f64;
+            let cy = anchor.y as f64;
+            for stroke in &mut session.strokes {
+                if !id_set.contains(stroke.id.as_str()) {
+                    continue;
+                }
+                changed = true;
+                for point in &mut stroke.points {
+                    let dx = point.x as f64 - cx;
+                    let dy = point.y as f64 - cy;
+                    point.x = (cx + dx * sx) as f32;
+                    point.y = (cy + dy * sy) as f32;
+                }
+            }
+        }
+        TransformOp::Rotate { center, delta } => {
+            let cx = center.x as f64;
+            let cy = center.y as f64;
+            let cos = delta.cos();
+            let sin = delta.sin();
+            for stroke in &mut session.strokes {
+                if !id_set.contains(stroke.id.as_str()) {
+                    continue;
+                }
+                changed = true;
+                for point in &mut stroke.points {
+                    let dx = point.x as f64 - cx;
+                    let dy = point.y as f64 - cy;
+                    point.x = (cx + dx * cos - dy * sin) as f32;
+                    point.y = (cy + dx * sin + dy * cos) as f32;
+                }
+            }
+        }
+    }
+    changed
 }
 
 fn remove_stroke(session: &mut Session, id: &str) -> bool {

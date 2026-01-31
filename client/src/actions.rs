@@ -1,4 +1,6 @@
-use yumboard_shared::{Point, Stroke};
+use std::collections::HashSet;
+
+use yumboard_shared::{Point, Stroke, TransformOp};
 
 use crate::geometry::{home_zoom_pan, normalize_point, stroke_hit};
 use crate::render::{draw_dot, draw_segment, redraw};
@@ -197,6 +199,67 @@ pub fn apply_transformed_strokes(state: &mut State, strokes: &[Stroke]) {
         replace_stroke_local(state, stroke.clone());
     }
     redraw(state);
+}
+
+pub fn apply_transform_operation(state: &mut State, ids: &[String], op: &TransformOp) {
+    if ids.is_empty() {
+        return;
+    }
+    let id_set: HashSet<&str> = ids.iter().map(|id| id.as_str()).collect();
+    match *op {
+        TransformOp::Translate { dx, dy } => {
+            if !dx.is_finite() || !dy.is_finite() {
+                return;
+            }
+            for stroke in &mut state.strokes {
+                if !id_set.contains(stroke.id.as_str()) {
+                    continue;
+                }
+                for point in &mut stroke.points {
+                    point.x = (point.x as f64 + dx) as f32;
+                    point.y = (point.y as f64 + dy) as f32;
+                }
+            }
+        }
+        TransformOp::Scale { anchor, sx, sy } => {
+            if !sx.is_finite() || !sy.is_finite() {
+                return;
+            }
+            let cx = anchor.x as f64;
+            let cy = anchor.y as f64;
+            for stroke in &mut state.strokes {
+                if !id_set.contains(stroke.id.as_str()) {
+                    continue;
+                }
+                for point in &mut stroke.points {
+                    let dx = point.x as f64 - cx;
+                    let dy = point.y as f64 - cy;
+                    point.x = (cx + dx * sx) as f32;
+                    point.y = (cy + dy * sy) as f32;
+                }
+            }
+        }
+        TransformOp::Rotate { center, delta } => {
+            if !delta.is_finite() {
+                return;
+            }
+            let cx = center.x as f64;
+            let cy = center.y as f64;
+            let cos = delta.cos();
+            let sin = delta.sin();
+            for stroke in &mut state.strokes {
+                if !id_set.contains(stroke.id.as_str()) {
+                    continue;
+                }
+                for point in &mut stroke.points {
+                    let dx = point.x as f64 - cx;
+                    let dy = point.y as f64 - cy;
+                    point.x = (cx + dx * cos - dy * sin) as f32;
+                    point.y = (cy + dx * sin + dy * cos) as f32;
+                }
+            }
+        }
+    }
 }
 
 pub fn finalize_lasso_selection(state: &mut State) {
