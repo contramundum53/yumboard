@@ -1165,6 +1165,7 @@ pub fn run() -> Result<(), JsValue> {
                             redraw(&mut state);
                             continue;
                         }
+                        state.pinch = None;
                     }
                 }
                 let (pan_x, pan_y, zoom) = {
