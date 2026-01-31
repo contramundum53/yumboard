@@ -473,6 +473,10 @@ body:not(.is-chrome) * {
   animation: none !important;
 }
 
+body:not(.is-chrome) .tool {
+  transition: none;
+}
+
 @supports (-webkit-touch-callout: none) {
   .toolbar {
     display: flex;
