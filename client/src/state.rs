@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use wasm_bindgen::prelude::Closure;
 use web_sys::{CanvasRenderingContext2d, FileReader, HtmlCanvasElement, ProgressEvent};
@@ -86,6 +86,13 @@ pub struct LoadingState {
     pub onload: Option<Closure<dyn FnMut(ProgressEvent)>>,
 }
 
+pub struct PinchState {
+    pub world_center_x: f64,
+    pub world_center_y: f64,
+    pub distance: f64,
+    pub zoom: f64,
+}
+
 pub enum Mode {
     Draw(DrawState),
     Erase(EraseMode),
@@ -106,6 +113,8 @@ pub struct State {
     pub pan_y: f64,
     pub palette: Vec<String>,
     pub mode: Mode,
+    pub touch_points: HashMap<i32, (f64, f64)>,
+    pub pinch: Option<PinchState>,
 }
 
 impl State {}

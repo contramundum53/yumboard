@@ -32,7 +32,7 @@ use crate::palette::{palette_action_from_event, render_palette, PaletteAction};
 use crate::persistence::{build_pdf_html, open_print_window, parse_load_payload, SaveData};
 use crate::render::redraw;
 use crate::state::{
-    DrawMode, DrawState, EraseMode, LoadingState, Mode, PanMode, ScaleAxis, SelectMode,
+    DrawMode, DrawState, EraseMode, LoadingState, Mode, PanMode, PinchState, ScaleAxis, SelectMode,
     SelectState, SelectionHit, State, DEFAULT_PALETTE,
 };
 use crate::util::make_id;
@@ -152,6 +152,16 @@ fn take_loading_previous(state: &mut State) -> Option<Mode> {
     }
 }
 
+fn is_touch_event(event: &PointerEvent) -> bool {
+    event.pointer_type() == "touch"
+}
+
+fn pinch_distance(points: &[(f64, f64)]) -> f64 {
+    let dx = points[0].0 - points[1].0;
+    let dy = points[0].1 - points[1].1;
+    (dx * dx + dy * dy).sqrt()
+}
+
 fn set_load_busy(load_button: &HtmlButtonElement, busy: bool) {
     let value = if busy { "true" } else { "false" };
     let _ = load_button.set_attribute("aria-busy", value);
@@ -222,6 +232,8 @@ pub fn run() -> Result<(), JsValue> {
             mode: DrawMode::Idle,
             palette_selected: 0,
         }),
+        touch_points: HashMap::new(),
+        pinch: None,
     }));
 
     update_size_label(&size_input, &size_value);
@@ -887,6 +899,42 @@ pub fn run() -> Result<(), JsValue> {
                 return;
             }
             event.prevent_default();
+            if is_touch_event(&event) {
+                let mut state = down_state.borrow_mut();
+                state.touch_points.insert(
+                    event.pointer_id(),
+                    (event.client_x() as f64, event.client_y() as f64),
+                );
+                if state.touch_points.len() >= 2 {
+                    let points = state
+                        .touch_points
+                        .values()
+                        .take(2)
+                        .copied()
+                        .collect::<Vec<_>>();
+                    let center_x = (points[0].0 + points[1].0) / 2.0;
+                    let center_y = (points[0].1 + points[1].1) / 2.0;
+                    let distance = pinch_distance(&points).max(0.001);
+                    let world_center_x = (center_x - state.pan_x) / state.zoom;
+                    let world_center_y = (center_y - state.pan_y) / state.zoom;
+                    state.pinch = Some(PinchState {
+                        world_center_x,
+                        world_center_y,
+                        distance,
+                        zoom: state.zoom,
+                    });
+                    if let Mode::Draw(draw) = &mut state.mode {
+                        if let DrawMode::Drawing { id } = &draw.mode {
+                            let id = id.clone();
+                            draw.mode = DrawMode::Idle;
+                            end_stroke(&mut state, &id);
+                            send_message(&down_socket, &ClientMessage::StrokeEnd { id });
+                        }
+                    }
+                    let _ = down_canvas.set_pointer_capture(event.pointer_id());
+                    return;
+                }
+            }
             let rect = down_canvas.get_bounding_client_rect();
             let screen_x = event.client_x() as f64 - rect.left();
             let screen_y = event.client_y() as f64 - rect.top();
@@ -1077,6 +1125,37 @@ pub fn run() -> Result<(), JsValue> {
         let move_schedule_flush = schedule_flush.clone();
         let onmove = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             for event in coalesced_pointer_events(&event) {
+                if is_touch_event(&event) {
+                    let mut state = move_state.borrow_mut();
+                    state.touch_points.insert(
+                        event.pointer_id(),
+                        (event.client_x() as f64, event.client_y() as f64),
+                    );
+                    if let Some(pinch) = state.pinch.as_ref() {
+                        if state.touch_points.len() >= 2 {
+                            let start_distance = pinch.distance;
+                            let pinch_zoom = pinch.zoom;
+                            let world_center_x = pinch.world_center_x;
+                            let world_center_y = pinch.world_center_y;
+                            let points = state
+                                .touch_points
+                                .values()
+                                .take(2)
+                                .copied()
+                                .collect::<Vec<_>>();
+                            let center_x = (points[0].0 + points[1].0) / 2.0;
+                            let center_y = (points[0].1 + points[1].1) / 2.0;
+                            let distance = pinch_distance(&points).max(0.001);
+                            let scale = distance / start_distance;
+                            let next_zoom = (pinch_zoom * scale).clamp(0.4, 4.0);
+                            state.zoom = next_zoom;
+                            state.pan_x = center_x - world_center_x * next_zoom;
+                            state.pan_y = center_y - world_center_y * next_zoom;
+                            redraw(&mut state);
+                            continue;
+                        }
+                    }
+                }
                 let (pan_x, pan_y, zoom) = {
                     let state = move_state.borrow();
                     (state.pan_x, state.pan_y, state.zoom)
@@ -1268,6 +1347,12 @@ pub fn run() -> Result<(), JsValue> {
                 return;
             }
             event.prevent_default();
+            if is_touch_event(&event) {
+                state.touch_points.remove(&event.pointer_id());
+                if state.touch_points.len() < 2 {
+                    state.pinch = None;
+                }
+            }
             if stop_canvas.has_pointer_capture(event.pointer_id()) {
                 let _ = stop_canvas.release_pointer_capture(event.pointer_id());
             }
