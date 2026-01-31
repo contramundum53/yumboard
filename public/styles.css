@@ -501,6 +501,7 @@ body {
   }
 
   #size::-webkit-slider-thumb {
-    margin-left: calc((34px - 18px) / 2);
+    margin-top: calc((6px - 18px) / 2);
+    margin-left: 0;
   }
 }
