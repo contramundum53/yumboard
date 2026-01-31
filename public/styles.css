@@ -474,10 +474,12 @@ body {
 
   .range-control {
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     width: 34px;
     height: 160px;
+    gap: 8px;
   }
 
   .range-control::before {
