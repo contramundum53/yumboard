@@ -50,9 +50,11 @@ pub async fn save_session(session_dir: &std::path::PathBuf, session_id: &str, st
 }
 
 fn encode_strokes(strokes: &[Stroke]) -> Vec<u8> {
-    bincode::serialize(strokes).unwrap_or_default()
+    bincode::serde::encode_to_vec(strokes, bincode::config::standard()).unwrap_or_default()
 }
 
 fn decode_strokes(payload: &[u8]) -> Option<Vec<Stroke>> {
-    bincode::deserialize(payload).ok()
+    bincode::serde::decode_from_slice(payload, bincode::config::standard())
+        .map(|(strokes, _)| strokes)
+        .ok()
 }

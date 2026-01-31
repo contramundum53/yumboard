@@ -555,8 +555,11 @@ pub fn run() -> Result<(), JsValue> {
         let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
             let message = if let Ok(buffer) = event.data().dyn_into::<js_sys::ArrayBuffer>() {
                 let bytes = Uint8Array::new(&buffer).to_vec();
-                match bincode::deserialize::<ServerMessage>(&bytes) {
-                    Ok(message) => message,
+                match bincode::serde::decode_from_slice::<ServerMessage, _>(
+                    &bytes,
+                    bincode::config::standard(),
+                ) {
+                    Ok((message, _)) => message,
                     Err(error) => {
                         web_sys::console::error_1(
                             &format!("WS message bincode parse error: {error}").into(),

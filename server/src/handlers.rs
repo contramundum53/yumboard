@@ -79,9 +79,12 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: String) {
 
     let strokes_snapshot = session.read().await.strokes.clone();
     let strokes_len = strokes_snapshot.len();
-    if let Ok(sync_payload) = bincode::serialize(&ServerMessage::Sync {
-        strokes: strokes_snapshot,
-    }) {
+    if let Ok(sync_payload) = bincode::serde::encode_to_vec(
+        &ServerMessage::Sync {
+            strokes: strokes_snapshot,
+        },
+        bincode::config::standard(),
+    ) {
         eprintln!(
             "WS sync send session={session_id} conn={connection_id} strokes={strokes_len} bytes={}",
             sync_payload.len()
@@ -97,7 +100,9 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: String) {
 
     let send_task = tokio::spawn(async move {
         while let Some(message) = rx.recv().await {
-            if let Ok(payload) = bincode::serialize(&message) {
+            if let Ok(payload) =
+                bincode::serde::encode_to_vec(&message, bincode::config::standard())
+            {
                 if socket_sender.send(Message::Binary(payload)).await.is_err() {
                     break;
                 }
@@ -128,8 +133,11 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: String) {
                 }
             }
             Message::Binary(data) => {
-                let parsed = bincode::deserialize::<ClientMessage>(&data);
-                if let Ok(client_message) = parsed {
+                let parsed = bincode::serde::decode_from_slice::<ClientMessage, _>(
+                    &data,
+                    bincode::config::standard(),
+                );
+                if let Ok((client_message, _)) = parsed {
                     let result = {
                         let mut session_guard = session.write().await;
                         apply_client_message(&mut session_guard, connection_id, client_message)
