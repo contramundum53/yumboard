@@ -107,24 +107,26 @@ fn coalesced_pointer_events(event: &PointerEvent) -> Vec<PointerEvent> {
             .ok()
             .and_then(|value| value.dyn_into::<Function>().ok());
 
-    let Some(get_coalesced_events) = get_coalesced_events else {
-        return vec![event.clone()];
-    };
-
-    let Ok(events) = get_coalesced_events
-        .call0(event.as_ref())
-        .and_then(|value| value.dyn_into::<js_sys::Array>())
-    else {
-        return vec![event.clone()];
-    };
-
-    let mut out = Vec::with_capacity(events.length() as usize + 1);
-    for index in 0..events.length() {
-        if let Ok(event) = events.get(index).dyn_into::<PointerEvent>() {
-            out.push(event);
+    let mut out = Vec::new();
+    if let Some(get_coalesced_events) = get_coalesced_events {
+        if let Ok(events) = get_coalesced_events
+            .call0(event.as_ref())
+            .and_then(|value| value.dyn_into::<js_sys::Array>())
+        {
+            out.reserve(events.length() as usize + 1);
+            for index in 0..events.length() {
+                if let Ok(event) = events.get(index).dyn_into::<PointerEvent>() {
+                    out.push(event);
+                }
+            }
         }
     }
     out.push(event.clone());
+    out.sort_by(|a, b| {
+        a.time_stamp()
+            .partial_cmp(&b.time_stamp())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     out
 }
 
@@ -1135,7 +1137,7 @@ pub fn run() -> Result<(), JsValue> {
                     let size = sanitize_size(down_size.value_as_number() as f32);
 
                     down_active_draw_pointer.set(Some(event.pointer_id()));
-                    down_active_draw_timestamp.set(event.time_stamp() - 0.0001);
+                    down_active_draw_timestamp.set(event.time_stamp());
 
                     draw.mode = DrawMode::Drawing { id: id.clone() };
                     state.mode = Mode::Draw(draw);
@@ -1365,7 +1367,7 @@ pub fn run() -> Result<(), JsValue> {
                             continue;
                         }
                         let timestamp = event.time_stamp();
-                        if timestamp <= move_active_draw_timestamp.get() {
+                        if timestamp < move_active_draw_timestamp.get() {
                             continue;
                         }
                         move_active_draw_timestamp.set(timestamp);
