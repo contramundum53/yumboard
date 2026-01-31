@@ -480,15 +480,24 @@ pub fn run() -> Result<(), JsValue> {
         ontimeout.forget();
     }
 
-    // iOS Safari can keep WebSocket connections alive longer than expected across reloads /
-    // page transitions, which can leave the next connection stuck in CONNECTING. Close the socket
-    // proactively when the page is hidden/unloaded.
-    {
+    // Note: do NOT close the WebSocket on `pagehide`.
+    //
+    // On iPad Safari, `pagehide` can fire in situations where the user is merely switching tabs /
+    // apps, and closing the socket there can race with initial connection setup (leaving the UI
+    // stuck "Connecting…") or unnecessarily break a live session.
+    //
+    // If you need to debug `pagehide` behavior, use `?debug=1` and watch for the log below.
+    if debug {
         let socket = socket.clone();
         let ws_url = ws_url.clone();
         let onpagehide = Closure::<dyn FnMut(Event)>::new(move |_| {
-            web_sys::console::log_1(&format!("pagehide -> ws.close url={ws_url}").into());
-            let _ = socket.close();
+            web_sys::console::log_1(
+                &format!(
+                    "pagehide url={ws_url} (no ws.close) ready_state={}",
+                    socket.ready_state()
+                )
+                .into(),
+            );
         });
         window.add_event_listener_with_callback("pagehide", onpagehide.as_ref().unchecked_ref())?;
         onpagehide.forget();
