@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
+use axum::http::header::{ORIGIN, USER_AGENT};
+use axum::http::HeaderMap;
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Redirect};
 use futures_util::{SinkExt, StreamExt};
@@ -39,11 +41,21 @@ pub async fn ws_handler(
     Path(session_id): Path<String>,
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> impl IntoResponse {
     let session_id = match normalize_session_id(&session_id) {
         Some(id) => id,
         None => return StatusCode::NOT_FOUND.into_response(),
     };
+    let user_agent = headers
+        .get(USER_AGENT)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("-");
+    let origin = headers
+        .get(ORIGIN)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("-");
+    eprintln!("WS upgrade requested session={session_id} ua={user_agent:?} origin={origin:?}");
     ws.on_upgrade(move |socket| handle_socket(socket, state, session_id))
 }
 
@@ -93,6 +105,8 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: String) {
         }
     });
 
+    let mut close_frame = None;
+
     while let Some(Ok(message)) = socket_receiver.next().await {
         match message {
             Message::Text(text) => {
@@ -113,7 +127,10 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: String) {
                     }
                 }
             }
-            Message::Close(_) => break,
+            Message::Close(frame) => {
+                close_frame = frame;
+                break;
+            }
             _ => {}
         }
     }
@@ -127,6 +144,12 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: String) {
             "WS disconnected session={session_id} conn={connection_id} peers={}",
             session.peers.len()
         );
+        if let Some(frame) = &close_frame {
+            eprintln!(
+                "WS close frame session={session_id} conn={connection_id} code={:?} reason={:?}",
+                frame.code, frame.reason
+            );
+        }
     }
     send_task.abort();
 
