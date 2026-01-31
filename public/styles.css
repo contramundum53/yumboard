@@ -494,8 +494,10 @@ body {
   }
 
   #size::-webkit-slider-runnable-track {
-    background-color: transparent;
+    background-color: rgba(35, 45, 65, 0.18);
     background-image: none;
+    border-radius: 999px;
+    height: 6px;
   }
 
   #size::-webkit-slider-thumb {
