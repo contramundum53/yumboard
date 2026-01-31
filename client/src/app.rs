@@ -1321,6 +1321,9 @@ pub fn run() -> Result<(), JsValue> {
                         redraw(&mut state);
                     }
                     Mode::Draw(draw) => {
+                        if event.buttons() == 0 {
+                            continue;
+                        }
                         let id = match &draw.mode {
                             DrawMode::Drawing { id } => id.clone(),
                             _ => continue,
