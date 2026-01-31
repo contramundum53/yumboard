@@ -487,10 +487,6 @@ body {
     margin-bottom: -45px;
   }
 
-  .range-control::before {
-    display: block;
-  }
-
   #size {
     writing-mode: horizontal-tb;
     transform: rotate(90deg);
@@ -498,13 +494,6 @@ body {
     width: 130px;
     height: 34px;
     margin: 0;
-  }
-
-  #size::-webkit-slider-runnable-track {
-    background-color: transparent;
-    background-image: none;
-    border-radius: 999px;
-    height: 6px;
   }
 
   #size::-webkit-slider-thumb {
