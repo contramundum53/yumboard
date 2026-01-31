@@ -6,9 +6,9 @@ use js_sys::{Function, Reflect};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
-    CanvasRenderingContext2d, Element, Event, FileReader, HtmlAnchorElement, HtmlButtonElement,
-    HtmlCanvasElement, HtmlElement, HtmlInputElement, HtmlSpanElement, KeyboardEvent, MessageEvent,
-    PointerEvent, ProgressEvent, WebSocket,
+    CanvasRenderingContext2d, CloseEvent, Element, Event, FileReader, HtmlAnchorElement,
+    HtmlButtonElement, HtmlCanvasElement, HtmlElement, HtmlInputElement, HtmlSpanElement,
+    KeyboardEvent, MessageEvent, PointerEvent, ProgressEvent, WebSocket,
 };
 
 use yumboard_shared::{ClientMessage, Point, ServerMessage, Stroke, TransformOp};
@@ -36,6 +36,42 @@ use crate::state::{
     SelectState, SelectionHit, State, DEFAULT_PALETTE,
 };
 use crate::util::make_id;
+
+fn debug_enabled(window: &web_sys::Window) -> bool {
+    let search = window.location().search().ok().unwrap_or_default();
+    search.contains("debug=1")
+        || search.contains("debug=true")
+        || search.contains("log=1")
+        || search.contains("log=true")
+}
+
+fn window_user_agent(window: &web_sys::Window) -> Option<String> {
+    let navigator = Reflect::get(window.as_ref(), &JsValue::from_str("navigator")).ok()?;
+    Reflect::get(&navigator, &JsValue::from_str("userAgent"))
+        .ok()?
+        .as_string()
+}
+
+fn window_is_secure_context(window: &web_sys::Window) -> Option<bool> {
+    Reflect::get(window.as_ref(), &JsValue::from_str("isSecureContext"))
+        .ok()?
+        .as_bool()
+}
+
+fn server_message_kind(message: &ServerMessage) -> &'static str {
+    match message {
+        ServerMessage::Sync { .. } => "sync",
+        ServerMessage::StrokeStart { .. } => "stroke:start",
+        ServerMessage::StrokeMove { .. } => "stroke:move",
+        ServerMessage::StrokePoints { .. } => "stroke:points",
+        ServerMessage::StrokeEnd { .. } => "stroke:end",
+        ServerMessage::Clear => "clear",
+        ServerMessage::StrokeRemove { .. } => "stroke:remove",
+        ServerMessage::StrokeRestore { .. } => "stroke:restore",
+        ServerMessage::StrokeReplace { .. } => "stroke:replace",
+        ServerMessage::TransformUpdate { .. } => "transform:update",
+    }
+}
 
 fn palette_selected(mode: &Mode) -> Option<usize> {
     match mode {
@@ -101,11 +137,37 @@ fn show_color_input(
     color_input.set_class_name("hidden-color active");
 }
 
+thread_local! {
+    static LOGGED_COALESCED: Cell<bool> = Cell::new(false);
+}
+
 fn coalesced_pointer_events(event: &PointerEvent) -> Vec<PointerEvent> {
     let get_coalesced_events =
         Reflect::get(event.as_ref(), &JsValue::from_str("getCoalescedEvents"))
             .ok()
             .and_then(|value| value.dyn_into::<Function>().ok());
+
+    LOGGED_COALESCED.with(|logged| {
+        if logged.get() {
+            return;
+        }
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        if !debug_enabled(&window) {
+            return;
+        }
+        logged.set(true);
+        let secure = window_is_secure_context(&window);
+        web_sys::console::log_1(
+            &format!(
+                "Pointer getCoalescedEvents available={} secure_context={secure:?} pointer_type={}",
+                get_coalesced_events.is_some(),
+                event.pointer_type()
+            )
+            .into(),
+        );
+    });
 
     let mut out = Vec::new();
     if let Some(get_coalesced_events) = get_coalesced_events {
@@ -179,6 +241,26 @@ pub fn run() -> Result<(), JsValue> {
     let document = window
         .document()
         .ok_or_else(|| JsValue::from_str("Missing document"))?;
+
+    let debug = debug_enabled(&window);
+    if debug {
+        let location = window.location();
+        let href = location.href().ok().unwrap_or_default();
+        let protocol = location.protocol().ok().unwrap_or_default();
+        let host = location.host().ok().unwrap_or_default();
+        let pathname = location.pathname().ok().unwrap_or_default();
+        let secure = window_is_secure_context(&window);
+        let user_agent = window_user_agent(&window);
+        web_sys::console::log_1(
+            &format!(
+                "YumBoard debug enabled href={href} protocol={protocol} host={host} pathname={pathname} secure_context={secure:?} ua={user_agent:?}"
+            )
+            .into(),
+        );
+        web_sys::console::log_1(
+            &"Tip: keep this session URL but add `?debug=1` to enable logs.".into(),
+        );
+    }
 
     let canvas: HtmlCanvasElement = get_element(&document, "board")?;
     let ctx = canvas
@@ -254,7 +336,9 @@ pub fn run() -> Result<(), JsValue> {
     }
 
     let ws_url = websocket_url(&window)?;
+    web_sys::console::log_1(&format!("WS connecting url={ws_url}").into());
     let socket = Rc::new(WebSocket::new(&ws_url)?);
+    web_sys::console::log_1(&format!("WS created ready_state={}", socket.ready_state()).into());
     let pending_points = Rc::new(RefCell::new(HashMap::<String, Vec<Point>>::new()));
     let flush_scheduled = Rc::new(Cell::new(false));
     let active_draw_pointer: Rc<Cell<Option<i32>>> = Rc::new(Cell::new(None));
@@ -298,7 +382,16 @@ pub fn run() -> Result<(), JsValue> {
     {
         let status_el = status_el.clone();
         let status_text = status_text.clone();
+        let socket_cb = socket.clone();
+        let ws_url = ws_url.clone();
         let onopen = Closure::<dyn FnMut(Event)>::new(move |_| {
+            web_sys::console::log_1(
+                &format!(
+                    "WS open url={ws_url} ready_state={}",
+                    socket_cb.ready_state()
+                )
+                .into(),
+            );
             set_status(&status_el, &status_text, "open", "Live connection");
         });
         socket.set_onopen(Some(onopen.as_ref().unchecked_ref()));
@@ -308,7 +401,19 @@ pub fn run() -> Result<(), JsValue> {
     {
         let status_el = status_el.clone();
         let status_text = status_text.clone();
-        let onclose = Closure::<dyn FnMut(Event)>::new(move |_| {
+        let socket_cb = socket.clone();
+        let ws_url = ws_url.clone();
+        let onclose = Closure::<dyn FnMut(CloseEvent)>::new(move |event: CloseEvent| {
+            web_sys::console::warn_1(
+                &format!(
+                    "WS close url={ws_url} code={} was_clean={} reason={:?} ready_state={}",
+                    event.code(),
+                    event.was_clean(),
+                    event.reason(),
+                    socket_cb.ready_state()
+                )
+                .into(),
+            );
             set_status(&status_el, &status_text, "closed", "Offline");
         });
         socket.set_onclose(Some(onclose.as_ref().unchecked_ref()));
@@ -318,11 +423,38 @@ pub fn run() -> Result<(), JsValue> {
     {
         let status_el = status_el.clone();
         let status_text = status_text.clone();
+        let socket_cb = socket.clone();
+        let ws_url = ws_url.clone();
         let onerror = Closure::<dyn FnMut(Event)>::new(move |_| {
+            web_sys::console::error_1(
+                &format!(
+                    "WS error url={ws_url} ready_state={} buffered_amount={}",
+                    socket_cb.ready_state(),
+                    socket_cb.buffered_amount()
+                )
+                .into(),
+            );
             set_status(&status_el, &status_text, "closed", "Connection error");
         });
         socket.set_onerror(Some(onerror.as_ref().unchecked_ref()));
         onerror.forget();
+    }
+
+    {
+        let socket = socket.clone();
+        let ws_url = ws_url.clone();
+        let ontimeout = Closure::<dyn FnMut()>::new(move || {
+            if socket.ready_state() == WebSocket::CONNECTING {
+                web_sys::console::warn_1(
+                    &format!("WS still CONNECTING after 6s url={ws_url}").into(),
+                );
+            }
+        });
+        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+            ontimeout.as_ref().unchecked_ref(),
+            6000,
+        );
+        ontimeout.forget();
     }
 
     // iOS Safari can keep WebSocket connections alive longer than expected across reloads /
@@ -330,7 +462,9 @@ pub fn run() -> Result<(), JsValue> {
     // proactively when the page is hidden/unloaded.
     {
         let socket = socket.clone();
+        let ws_url = ws_url.clone();
         let onpagehide = Closure::<dyn FnMut(Event)>::new(move |_| {
+            web_sys::console::log_1(&format!("pagehide -> ws.close url={ws_url}").into());
             let _ = socket.close();
         });
         window.add_event_listener_with_callback("pagehide", onpagehide.as_ref().unchecked_ref())?;
@@ -339,7 +473,9 @@ pub fn run() -> Result<(), JsValue> {
 
     {
         let socket = socket.clone();
+        let ws_url = ws_url.clone();
         let onbeforeunload = Closure::<dyn FnMut(Event)>::new(move |_| {
+            web_sys::console::log_1(&format!("beforeunload -> ws.close url={ws_url}").into());
             let _ = socket.close();
         });
         window.add_event_listener_with_callback(
@@ -351,19 +487,50 @@ pub fn run() -> Result<(), JsValue> {
 
     {
         let message_state = state.clone();
+        let message_count = Rc::new(Cell::new(0u32));
+        let message_count_cb = message_count.clone();
         let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
             let text = match event.data().as_string() {
                 Some(text) => text,
-                None => return,
+                None => {
+                    web_sys::console::error_2(
+                        &"WS message data is not a string".into(),
+                        &event.data(),
+                    );
+                    return;
+                }
             };
             let message = match serde_json::from_str::<ServerMessage>(&text) {
                 Ok(message) => message,
-                Err(_) => return,
+                Err(error) => {
+                    let snippet = if text.len() <= 200 {
+                        text
+                    } else {
+                        format!("{}...", &text[..200])
+                    };
+                    web_sys::console::error_1(
+                        &format!("WS message JSON parse error: {error} payload={snippet:?}").into(),
+                    );
+                    return;
+                }
             };
+
+            let count = message_count_cb.get() + 1;
+            message_count_cb.set(count);
+            if debug && count <= 8 {
+                web_sys::console::log_1(
+                    &format!("WS message #{count} type={}", server_message_kind(&message)).into(),
+                );
+            }
 
             let mut state = message_state.borrow_mut();
             match message {
                 ServerMessage::Sync { strokes } => {
+                    if debug {
+                        web_sys::console::log_1(
+                            &format!("WS sync strokes={}", strokes.len()).into(),
+                        );
+                    }
                     adopt_strokes(&mut state, strokes);
                 }
                 ServerMessage::StrokeStart {
@@ -400,6 +567,11 @@ pub fn run() -> Result<(), JsValue> {
                     redraw(&mut state);
                 }
                 ServerMessage::TransformUpdate { ids, op } => {
+                    if debug {
+                        web_sys::console::log_1(
+                            &format!("WS transform:update ids={} op={op:?}", ids.len()).into(),
+                        );
+                    }
                     apply_transform_operation(&mut state, &ids, &op);
                     redraw(&mut state);
                 }
