@@ -2,13 +2,13 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use js_sys::{Function, Reflect, Uint8Array};
+use js_sys::{Function, Reflect};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
-    CanvasRenderingContext2d, CloseEvent, Element, Event, FileReader, HtmlAnchorElement,
-    HtmlButtonElement, HtmlCanvasElement, HtmlElement, HtmlInputElement, HtmlSpanElement,
-    KeyboardEvent, MessageEvent, PointerEvent, ProgressEvent, WebSocket,
+    CanvasRenderingContext2d, Element, Event, FileReader, HtmlAnchorElement, HtmlButtonElement,
+    HtmlCanvasElement, HtmlElement, HtmlInputElement, HtmlSpanElement, KeyboardEvent, PointerEvent,
+    ProgressEvent,
 };
 
 use yumboard_shared::{ClientMessage, Point, ServerMessage, Stroke, StrokeId, TransformOp};
@@ -27,7 +27,6 @@ use crate::geometry::{
     angle_between, apply_rotation, apply_scale_xy, apply_translation, clamp_scale,
     selected_strokes, selection_center, selection_hit_test,
 };
-use crate::net::{send_message, websocket_url};
 use crate::palette::{palette_action_from_event, render_palette, PaletteAction};
 use crate::persistence::{build_pdf_html, open_print_window, parse_load_payload, SaveData};
 use crate::render::redraw;
@@ -36,38 +35,7 @@ use crate::state::{
     SelectState, SelectionHit, State, DEFAULT_PALETTE,
 };
 use crate::util::make_id;
-
-fn window_user_agent(window: &web_sys::Window) -> Option<String> {
-    let navigator = Reflect::get(window.as_ref(), &JsValue::from_str("navigator")).ok()?;
-    Reflect::get(&navigator, &JsValue::from_str("userAgent"))
-        .ok()?
-        .as_string()
-}
-
-fn navigator_max_touch_points(window: &web_sys::Window) -> Option<u32> {
-    let navigator = Reflect::get(window.as_ref(), &JsValue::from_str("navigator")).ok()?;
-    Reflect::get(&navigator, &JsValue::from_str("maxTouchPoints"))
-        .ok()?
-        .as_f64()
-        .map(|value| value as u32)
-}
-
-fn should_kick_safari_ws(window: &web_sys::Window) -> bool {
-    let ua = window_user_agent(window).unwrap_or_default();
-    let is_safari = ua.contains("Safari")
-        && !ua.contains("Chrome")
-        && !ua.contains("CriOS")
-        && !ua.contains("FxiOS")
-        && !ua.contains("Edg")
-        && !ua.contains("OPR");
-    let touch = navigator_max_touch_points(window).unwrap_or(0) > 1;
-    is_safari && touch
-}
-
-fn ping_url() -> String {
-    let now = js_sys::Date::now() as u64;
-    format!("/ping?t={now}")
-}
+use crate::ws::{connect_ws, WsEvent};
 
 fn palette_selected(mode: &Mode) -> Option<usize> {
     match mode {
@@ -288,192 +256,61 @@ fn start_app() -> Result<(), JsValue> {
         show_color_input(&palette_el, &color_input, selected);
     }
 
-    let ws_url = websocket_url(&window)?;
-    let kick_safari_ws = should_kick_safari_ws(&window);
-    let socket = Rc::new(WebSocket::new(&ws_url)?);
-    let _ = Reflect::set(
-        socket.as_ref(),
-        &JsValue::from_str("binaryType"),
-        &JsValue::from_str("arraybuffer"),
-    );
-
-    let ws_open_reported = Rc::new(Cell::new(false));
-
-    {
+    let ws_sender = connect_ws(&window, {
         let status_el = status_el.clone();
         let status_text = status_text.clone();
-        let ws_open_reported = ws_open_reported.clone();
-        let onopen = Closure::<dyn FnMut(Event)>::new(move |_| {
-            ws_open_reported.set(true);
-            set_status(&status_el, &status_text, "open", "Live connection");
-        });
-        socket.set_onopen(Some(onopen.as_ref().unchecked_ref()));
-        onopen.forget();
-    }
-
-    {
-        let status_el = status_el.clone();
-        let status_text = status_text.clone();
-        let ws_open_reported = ws_open_reported.clone();
-        let onclose = Closure::<dyn FnMut(CloseEvent)>::new(move |_event: CloseEvent| {
-            ws_open_reported.set(false);
-            set_status(&status_el, &status_text, "closed", "Offline");
-        });
-        socket.set_onclose(Some(onclose.as_ref().unchecked_ref()));
-        onclose.forget();
-    }
-
-    {
-        let status_el = status_el.clone();
-        let status_text = status_text.clone();
-        let ws_open_reported = ws_open_reported.clone();
-        let onerror = Closure::<dyn FnMut(Event)>::new(move |_| {
-            ws_open_reported.set(false);
-            set_status(&status_el, &status_text, "closed", "Connection error");
-        });
-        socket.set_onerror(Some(onerror.as_ref().unchecked_ref()));
-        onerror.forget();
-    }
-
-    if kick_safari_ws {
-        let socket = socket.clone();
-        let window_cb = window.clone();
-        let onkick = Closure::<dyn FnMut()>::new(move || {
-            if socket.ready_state() == WebSocket::CONNECTING {
-                let _ = window_cb.fetch_with_str(&ping_url());
-            }
-        });
-        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-            onkick.as_ref().unchecked_ref(),
-            250,
-        );
-        onkick.forget();
-    }
-
-    {
-        let socket = socket.clone();
-        let window_cb = window.clone();
-        let kick_safari_ws = kick_safari_ws;
-        let ontimeout = Closure::<dyn FnMut()>::new(move || {
-            if socket.ready_state() == WebSocket::CONNECTING && kick_safari_ws {
-                let _ = window_cb.fetch_with_str(&ping_url());
-            }
-        });
-        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-            ontimeout.as_ref().unchecked_ref(),
-            6000,
-        );
-        ontimeout.forget();
-    }
-
-    {
-        let socket = socket.clone();
-        let onbeforeunload = Closure::<dyn FnMut(Event)>::new(move |_| {
-            let _ = socket.close();
-        });
-        window.add_event_listener_with_callback(
-            "beforeunload",
-            onbeforeunload.as_ref().unchecked_ref(),
-        )?;
-        onbeforeunload.forget();
-    }
-
-    {
         let message_state = state.clone();
-        let status_el = status_el.clone();
-        let status_text = status_text.clone();
-        let ws_open_reported = ws_open_reported.clone();
-        let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
-            if !ws_open_reported.get() {
-                ws_open_reported.set(true);
-                set_status(&status_el, &status_text, "open", "Live connection");
-            }
-
-            let message = if let Ok(buffer) = event.data().dyn_into::<js_sys::ArrayBuffer>() {
-                let bytes = Uint8Array::new(&buffer).to_vec();
-                match bincode::decode_from_slice::<ServerMessage, _>(
-                    &bytes,
-                    bincode::config::standard(),
-                ) {
-                    Ok((message, _)) => message,
-                    Err(error) => {
-                        web_sys::console::error_1(
-                            &format!("WS message bincode parse error: {error}").into(),
-                        );
-                        return;
+        move |event: WsEvent| match event {
+            WsEvent::Open => set_status(&status_el, &status_text, "open", "Live connection"),
+            WsEvent::Close => set_status(&status_el, &status_text, "closed", "Offline"),
+            WsEvent::Error => set_status(&status_el, &status_text, "closed", "Connection error"),
+            WsEvent::Message(message) => {
+                let mut state = message_state.borrow_mut();
+                match message {
+                    ServerMessage::Sync { strokes } => {
+                        adopt_strokes(&mut state, strokes);
                     }
-                }
-            } else if let Some(text) = event.data().as_string() {
-                match serde_json::from_str::<ServerMessage>(&text) {
-                    Ok(message) => message,
-                    Err(error) => {
-                        let snippet = if text.len() <= 200 {
-                            text
-                        } else {
-                            format!("{}...", &text[..200])
-                        };
-                        web_sys::console::error_1(
-                            &format!("WS message JSON parse error: {error} payload={snippet:?}")
-                                .into(),
-                        );
-                        return;
+                    ServerMessage::StrokeStart {
+                        id,
+                        color,
+                        size,
+                        point,
+                    } => {
+                        start_stroke(&mut state, id, color, size, point);
                     }
-                }
-            } else {
-                web_sys::console::error_2(
-                    &"WS message data is not a string or arraybuffer".into(),
-                    &event.data(),
-                );
-                return;
-            };
-
-            let mut state = message_state.borrow_mut();
-            match message {
-                ServerMessage::Sync { strokes } => {
-                    adopt_strokes(&mut state, strokes);
-                }
-                ServerMessage::StrokeStart {
-                    id,
-                    color,
-                    size,
-                    point,
-                } => {
-                    start_stroke(&mut state, id, color, size, point);
-                }
-                ServerMessage::StrokeMove { id, point } => {
-                    let _ = move_stroke(&mut state, &id, point);
-                }
-                ServerMessage::StrokePoints { id, points } => {
-                    for point in points {
+                    ServerMessage::StrokeMove { id, point } => {
                         let _ = move_stroke(&mut state, &id, point);
                     }
-                }
-                ServerMessage::StrokeEnd { id } => {
-                    end_stroke(&mut state, &id);
-                }
-                ServerMessage::Clear => {
-                    clear_board(&mut state);
-                }
-                ServerMessage::StrokeRemove { id } => {
-                    remove_stroke(&mut state, &id);
-                    redraw(&mut state);
-                }
-                ServerMessage::StrokeRestore { stroke } => {
-                    restore_stroke(&mut state, stroke);
-                }
-                ServerMessage::StrokeReplace { stroke } => {
-                    replace_stroke_local(&mut state, stroke);
-                    redraw(&mut state);
-                }
-                ServerMessage::TransformUpdate { ids, op } => {
-                    apply_transform_operation(&mut state, &ids, &op);
-                    redraw(&mut state);
+                    ServerMessage::StrokePoints { id, points } => {
+                        for point in points {
+                            let _ = move_stroke(&mut state, &id, point);
+                        }
+                    }
+                    ServerMessage::StrokeEnd { id } => {
+                        end_stroke(&mut state, &id);
+                    }
+                    ServerMessage::Clear => {
+                        clear_board(&mut state);
+                    }
+                    ServerMessage::StrokeRemove { id } => {
+                        remove_stroke(&mut state, &id);
+                        redraw(&mut state);
+                    }
+                    ServerMessage::StrokeRestore { stroke } => {
+                        restore_stroke(&mut state, stroke);
+                    }
+                    ServerMessage::StrokeReplace { stroke } => {
+                        replace_stroke_local(&mut state, stroke);
+                        redraw(&mut state);
+                    }
+                    ServerMessage::TransformUpdate { ids, op } => {
+                        apply_transform_operation(&mut state, &ids, &op);
+                        redraw(&mut state);
+                    }
                 }
             }
-        });
-        socket.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
-        onmessage.forget();
-    }
+        }
+    })?;
 
     let pending_points = Rc::new(RefCell::new(HashMap::<StrokeId, Vec<Point>>::new()));
     let flush_scheduled = Rc::new(Cell::new(false));
@@ -482,7 +319,7 @@ fn start_app() -> Result<(), JsValue> {
     let schedule_flush: Rc<dyn Fn()> = Rc::new({
         let pending_points = pending_points.clone();
         let flush_scheduled = flush_scheduled.clone();
-        let socket = socket.clone();
+        let sender = ws_sender.clone();
         let window = window.clone();
         move || {
             if flush_scheduled.replace(true) {
@@ -490,7 +327,7 @@ fn start_app() -> Result<(), JsValue> {
             }
             let pending_points = pending_points.clone();
             let flush_scheduled = flush_scheduled.clone();
-            let socket = socket.clone();
+            let sender = sender.clone();
             let cb = Closure::once_into_js(move |_: f64| {
                 flush_scheduled.set(false);
                 let mut pending_guard = pending_points.borrow_mut();
@@ -501,13 +338,10 @@ fn start_app() -> Result<(), JsValue> {
                     while !points.is_empty() {
                         let chunk_size = points.len().min(MAX_POINTS_PER_MESSAGE);
                         let chunk = points.drain(..chunk_size).collect::<Vec<_>>();
-                        send_message(
-                            &socket,
-                            &ClientMessage::StrokePoints {
-                                id: id.clone(),
-                                points: chunk,
-                            },
-                        );
+                        sender.send(&ClientMessage::StrokePoints {
+                            id: id.clone(),
+                            points: chunk,
+                        });
                     }
                 }
             });
@@ -527,7 +361,7 @@ fn start_app() -> Result<(), JsValue> {
     }
 
     {
-        let key_socket = socket.clone();
+        let key_sender = ws_sender.clone();
         let key_state = state.clone();
         let onkeydown = Closure::<dyn FnMut(KeyboardEvent)>::new(move |event: KeyboardEvent| {
             let key = event.key();
@@ -553,24 +387,24 @@ fn start_app() -> Result<(), JsValue> {
                         redraw(&mut state);
                         ids
                     };
-                    send_message(&key_socket, &ClientMessage::Remove { ids });
+                    key_sender.send(&ClientMessage::Remove { ids });
                     event.prevent_default();
                 }
                 return;
             }
             if event.shift_key() && key.eq_ignore_ascii_case("z") {
                 event.prevent_default();
-                send_message(&key_socket, &ClientMessage::Redo);
+                key_sender.send(&ClientMessage::Redo);
                 return;
             }
             if key.eq_ignore_ascii_case("z") {
                 event.prevent_default();
-                send_message(&key_socket, &ClientMessage::Undo);
+                key_sender.send(&ClientMessage::Undo);
                 return;
             }
             if key.eq_ignore_ascii_case("y") {
                 event.prevent_default();
-                send_message(&key_socket, &ClientMessage::Redo);
+                key_sender.send(&ClientMessage::Redo);
             }
         });
         window.add_event_listener_with_callback("keydown", onkeydown.as_ref().unchecked_ref())?;
@@ -825,31 +659,31 @@ fn start_app() -> Result<(), JsValue> {
 
     {
         let clear_state = state.clone();
-        let clear_socket = socket.clone();
+        let clear_sender = ws_sender.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             {
                 let mut state = clear_state.borrow_mut();
                 clear_board(&mut state);
             }
-            send_message(&clear_socket, &ClientMessage::Clear);
+            clear_sender.send(&ClientMessage::Clear);
         });
         clear_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
     }
 
     {
-        let undo_socket = socket.clone();
+        let undo_sender = ws_sender.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
-            send_message(&undo_socket, &ClientMessage::Undo);
+            undo_sender.send(&ClientMessage::Undo);
         });
         undo_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
     }
 
     {
-        let redo_socket = socket.clone();
+        let redo_sender = ws_sender.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
-            send_message(&redo_socket, &ClientMessage::Redo);
+            redo_sender.send(&ClientMessage::Redo);
         });
         redo_button.add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
@@ -963,7 +797,7 @@ fn start_app() -> Result<(), JsValue> {
     {
         let load_file_cb = load_file.clone();
         let load_state_onchange = state.clone();
-        let load_socket_onchange = socket.clone();
+        let load_sender_onchange = ws_sender.clone();
         let load_button_cb = load_button.clone();
         let onchange = Closure::<dyn FnMut(Event)>::new(move |_| {
             let files = load_file_cb.files();
@@ -982,7 +816,7 @@ fn start_app() -> Result<(), JsValue> {
                 Err(_) => return,
             };
             let load_state_onload = load_state_onchange.clone();
-            let load_socket_onload = load_socket_onchange.clone();
+            let load_sender_onload = load_sender_onchange.clone();
             let load_button_onload = load_button_cb.clone();
             let onload = Closure::<dyn FnMut(ProgressEvent)>::new(move |event: ProgressEvent| {
                 let strokes = read_load_payload(&event);
@@ -999,7 +833,7 @@ fn start_app() -> Result<(), JsValue> {
                 }
                 set_load_busy(&load_button_onload, false);
                 if let Some(strokes) = strokes {
-                    send_message(&load_socket_onload, &ClientMessage::Load { strokes });
+                    load_sender_onload.send(&ClientMessage::Load { strokes });
                 }
             });
             reader.set_onload(Some(onload.as_ref().unchecked_ref()));
@@ -1025,7 +859,7 @@ fn start_app() -> Result<(), JsValue> {
 
     {
         let down_state = state.clone();
-        let down_socket = socket.clone();
+        let down_sender = ws_sender.clone();
         let down_canvas = canvas.clone();
         let down_color = color_input.clone();
         let down_size = size_input.clone();
@@ -1065,7 +899,7 @@ fn start_app() -> Result<(), JsValue> {
                             let id = id.clone();
                             draw.mode = DrawMode::Idle;
                             end_stroke(&mut state, &id);
-                            send_message(&down_socket, &ClientMessage::StrokeEnd { id });
+                            down_sender.send(&ClientMessage::StrokeEnd { id });
                             down_active_draw_pointer.set(None);
                             down_active_draw_timestamp.set(0.0);
                         }
@@ -1142,7 +976,7 @@ fn start_app() -> Result<(), JsValue> {
                                 select.mode = SelectMode::Idle;
                                 state.mode = Mode::Select(select);
                                 redraw(&mut state);
-                                send_message(&down_socket, &ClientMessage::Remove { ids });
+                                down_sender.send(&ClientMessage::Remove { ids });
                                 let _ = down_canvas.set_pointer_capture(event.pointer_id());
                                 return;
                             }
@@ -1156,10 +990,7 @@ fn start_app() -> Result<(), JsValue> {
                                     };
                                     let ids = selection_ids.clone();
                                     if !ids.is_empty() {
-                                        send_message(
-                                            &down_socket,
-                                            &ClientMessage::TransformStart { ids },
-                                        );
+                                        down_sender.send(&ClientMessage::TransformStart { ids });
                                     }
                                 }
                             }
@@ -1177,10 +1008,7 @@ fn start_app() -> Result<(), JsValue> {
                                     };
                                     let ids = selection_ids.clone();
                                     if !ids.is_empty() {
-                                        send_message(
-                                            &down_socket,
-                                            &ClientMessage::TransformStart { ids },
-                                        );
+                                        down_sender.send(&ClientMessage::TransformStart { ids });
                                     }
                                 }
                             }
@@ -1193,10 +1021,7 @@ fn start_app() -> Result<(), JsValue> {
                                 };
                                 let ids = selection_ids.clone();
                                 if !ids.is_empty() {
-                                    send_message(
-                                        &down_socket,
-                                        &ClientMessage::TransformStart { ids },
-                                    );
+                                    down_sender.send(&ClientMessage::TransformStart { ids });
                                 }
                             }
                         }
@@ -1235,7 +1060,7 @@ fn start_app() -> Result<(), JsValue> {
                     });
                     let removed_ids = erase_hits_at_point(&mut state, point);
                     for id in removed_ids {
-                        send_message(&down_socket, &ClientMessage::Erase { id });
+                        down_sender.send(&ClientMessage::Erase { id });
                     }
                     let _ = down_canvas.set_pointer_capture(event.pointer_id());
                 }
@@ -1258,15 +1083,12 @@ fn start_app() -> Result<(), JsValue> {
                     state.mode = Mode::Draw(draw);
                     start_stroke(&mut state, id.clone(), color.clone(), size, point);
 
-                    send_message(
-                        &down_socket,
-                        &ClientMessage::StrokeStart {
-                            id,
-                            color,
-                            size,
-                            point,
-                        },
-                    );
+                    down_sender.send(&ClientMessage::StrokeStart {
+                        id,
+                        color,
+                        size,
+                        point,
+                    });
                     let _ = down_canvas.set_pointer_capture(event.pointer_id());
                 }
             }
@@ -1277,7 +1099,7 @@ fn start_app() -> Result<(), JsValue> {
 
     {
         let move_state = state.clone();
-        let move_socket = socket.clone();
+        let move_sender = ws_sender.clone();
         let move_canvas = canvas.clone();
         let move_pending_points = pending_points.clone();
         let move_schedule_flush = schedule_flush.clone();
@@ -1499,7 +1321,7 @@ fn start_app() -> Result<(), JsValue> {
                             apply_transformed_strokes(&mut state, &updated);
                         }
                         if let Some(message) = pending_message {
-                            send_message(&move_socket, &message);
+                            move_sender.send(&message);
                         }
                     }
                     Mode::Erase(EraseMode::Active { .. }) => {
@@ -1509,7 +1331,7 @@ fn start_app() -> Result<(), JsValue> {
                         };
                         let removed_ids = erase_hits_at_point(&mut state, point);
                         for id in removed_ids {
-                            send_message(&move_socket, &ClientMessage::Erase { id });
+                            move_sender.send(&ClientMessage::Erase { id });
                         }
                     }
                     Mode::Pan(PanMode::Active {
@@ -1564,7 +1386,7 @@ fn start_app() -> Result<(), JsValue> {
 
     {
         let stop_state = state.clone();
-        let stop_socket = socket.clone();
+        let stop_sender = ws_sender.clone();
         let stop_canvas = canvas.clone();
         let stop_pending_points = pending_points.clone();
         let stop_active_draw_pointer = active_draw_pointer.clone();
@@ -1620,7 +1442,7 @@ fn start_app() -> Result<(), JsValue> {
                     drop(state);
                     if let Some(ids) = end_ids {
                         if !ids.is_empty() {
-                            send_message(&stop_socket, &ClientMessage::TransformEnd { ids });
+                            stop_sender.send(&ClientMessage::TransformEnd { ids });
                         }
                     }
                 }
@@ -1649,16 +1471,13 @@ fn start_app() -> Result<(), JsValue> {
                         while !points.is_empty() {
                             let chunk_size = points.len().min(MAX_POINTS_PER_MESSAGE);
                             let chunk = points.drain(..chunk_size).collect::<Vec<_>>();
-                            send_message(
-                                &stop_socket,
-                                &ClientMessage::StrokePoints {
-                                    id: id.clone(),
-                                    points: chunk,
-                                },
-                            );
+                            stop_sender.send(&ClientMessage::StrokePoints {
+                                id: id.clone(),
+                                points: chunk,
+                            });
                         }
                     }
-                    send_message(&stop_socket, &ClientMessage::StrokeEnd { id });
+                    stop_sender.send(&ClientMessage::StrokeEnd { id });
                 }
                 _ => {}
             }

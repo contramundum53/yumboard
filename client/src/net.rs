@@ -1,7 +1,5 @@
 use wasm_bindgen::JsValue;
-use web_sys::{WebSocket, Window};
-
-use yumboard_shared::ClientMessage;
+use web_sys::Window;
 
 pub fn websocket_url(window: &Window) -> Result<String, JsValue> {
     let location = window.location();
@@ -41,13 +39,5 @@ fn session_id_from_location(location: &web_sys::Location) -> Option<String> {
         None
     } else {
         Some(session_id.to_string())
-    }
-}
-
-pub fn send_message(socket: &WebSocket, message: &ClientMessage) {
-    if socket.ready_state() == WebSocket::OPEN {
-        if let Ok(payload) = bincode::encode_to_vec(message, bincode::config::standard()) {
-            let _ = socket.send_with_u8_array(&payload);
-        }
     }
 }

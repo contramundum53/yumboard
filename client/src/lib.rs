@@ -8,5 +8,6 @@ mod persistence;
 mod render;
 mod state;
 mod util;
+mod ws;
 
 pub use app::run;
