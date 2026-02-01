@@ -37,51 +37,11 @@ use crate::state::{
 };
 use crate::util::make_id;
 
-fn debug_enabled(window: &web_sys::Window) -> bool {
-    let search = window.location().search().ok().unwrap_or_default();
-    search.contains("debug=1")
-        || search.contains("debug=true")
-        || search.contains("log=1")
-        || search.contains("log=true")
-}
-
 fn window_user_agent(window: &web_sys::Window) -> Option<String> {
     let navigator = Reflect::get(window.as_ref(), &JsValue::from_str("navigator")).ok()?;
     Reflect::get(&navigator, &JsValue::from_str("userAgent"))
         .ok()?
         .as_string()
-}
-
-fn window_is_secure_context(window: &web_sys::Window) -> Option<bool> {
-    Reflect::get(window.as_ref(), &JsValue::from_str("isSecureContext"))
-        .ok()?
-        .as_bool()
-}
-
-fn document_hidden(document: &web_sys::Document) -> Option<bool> {
-    Reflect::get(document.as_ref(), &JsValue::from_str("hidden"))
-        .ok()?
-        .as_bool()
-}
-
-fn document_visibility_state(document: &web_sys::Document) -> Option<String> {
-    Reflect::get(document.as_ref(), &JsValue::from_str("visibilityState"))
-        .ok()?
-        .as_string()
-}
-
-fn page_transition_persisted(event: &Event) -> Option<bool> {
-    Reflect::get(event.as_ref(), &JsValue::from_str("persisted"))
-        .ok()?
-        .as_bool()
-}
-
-fn set_debug_mark(window: &web_sys::Window, mark: &str) {
-    let _ = Reflect::set(
-        window.as_ref(),
-        &JsValue::from_str("__yumboard_last_mark"),
-        &JsValue::from_str(mark),
-    );
 }
 
 fn navigator_max_touch_points(window: &web_sys::Window) -> Option<u32> {
@@ -107,21 +67,6 @@ fn should_kick_safari_ws(window: &web_sys::Window) -> bool {
 fn ping_url() -> String {
     let now = js_sys::Date::now() as u64;
     format!("/ping?t={now}")
-}
-
-fn server_message_kind(message: &ServerMessage) -> &'static str {
-    match message {
-        ServerMessage::Sync { .. } => "sync",
-        ServerMessage::StrokeStart { .. } => "stroke:start",
-        ServerMessage::StrokeMove { .. } => "stroke:move",
-        ServerMessage::StrokePoints { .. } => "stroke:points",
-        ServerMessage::StrokeEnd { .. } => "stroke:end",
-        ServerMessage::Clear => "clear",
-        ServerMessage::StrokeRemove { .. } => "stroke:remove",
-        ServerMessage::StrokeRestore { .. } => "stroke:restore",
-        ServerMessage::StrokeReplace { .. } => "stroke:replace",
-        ServerMessage::TransformUpdate { .. } => "transform:update",
-    }
 }
 
 fn palette_selected(mode: &Mode) -> Option<usize> {
@@ -188,37 +133,11 @@ fn show_color_input(
     color_input.set_class_name("hidden-color active");
 }
 
-thread_local! {
-    static LOGGED_COALESCED: Cell<bool> = Cell::new(false);
-}
-
 fn coalesced_pointer_events(event: &PointerEvent) -> Vec<PointerEvent> {
     let get_coalesced_events =
         Reflect::get(event.as_ref(), &JsValue::from_str("getCoalescedEvents"))
             .ok()
             .and_then(|value| value.dyn_into::<Function>().ok());
-
-    LOGGED_COALESCED.with(|logged| {
-        if logged.get() {
-            return;
-        }
-        let Some(window) = web_sys::window() else {
-            return;
-        };
-        if !debug_enabled(&window) {
-            return;
-        }
-        logged.set(true);
-        let secure = window_is_secure_context(&window);
-        web_sys::console::log_1(
-            &format!(
-                "Pointer getCoalescedEvents available={} secure_context={secure:?} pointer_type={}",
-                get_coalesced_events.is_some(),
-                event.pointer_type()
-            )
-            .into(),
-        );
-    });
 
     let mut out = Vec::new();
     if let Some(get_coalesced_events) = get_coalesced_events {
@@ -292,70 +211,9 @@ pub fn run() -> Result<(), JsValue> {
 
 fn start_app() -> Result<(), JsValue> {
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("Missing window"))?;
-    set_debug_mark(&window, "run:start");
     let document = window
         .document()
         .ok_or_else(|| JsValue::from_str("Missing document"))?;
-
-    let debug = debug_enabled(&window);
-    if debug {
-        let location = window.location();
-        let href = location.href().ok().unwrap_or_default();
-        let protocol = location.protocol().ok().unwrap_or_default();
-        let host = location.host().ok().unwrap_or_default();
-        let pathname = location.pathname().ok().unwrap_or_default();
-        let secure = window_is_secure_context(&window);
-        let user_agent = window_user_agent(&window);
-        web_sys::console::log_1(
-            &format!(
-                "YumBoard debug enabled href={href} protocol={protocol} host={host} pathname={pathname} secure_context={secure:?} ua={user_agent:?}"
-            )
-            .into(),
-        );
-        web_sys::console::log_1(
-            &"Tip: keep this session URL but add `?debug=1` to enable logs.".into(),
-        );
-
-        {
-            let document_target = document.clone();
-            let document_cb = document_target.clone();
-            let onvisibilitychange = Closure::<dyn FnMut(Event)>::new(move |_| {
-                let hidden = document_hidden(&document_cb);
-                let visibility = document_visibility_state(&document_cb);
-                web_sys::console::log_1(
-                    &format!("visibilitychange hidden={hidden:?} visibility_state={visibility:?}")
-                        .into(),
-                );
-            });
-            document_target.add_event_listener_with_callback(
-                "visibilitychange",
-                onvisibilitychange.as_ref().unchecked_ref(),
-            )?;
-            onvisibilitychange.forget();
-        }
-
-        {
-            let document = document.clone();
-            let onpageshow = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
-                let persisted = page_transition_persisted(&event);
-                let hidden = document_hidden(&document);
-                let visibility = document_visibility_state(&document);
-                web_sys::console::log_1(
-                    &format!(
-                        "pageshow persisted={persisted:?} hidden={hidden:?} visibility_state={visibility:?}"
-                    )
-                    .into(),
-                );
-            });
-            window.add_event_listener_with_callback(
-                "pageshow",
-                onpageshow.as_ref().unchecked_ref(),
-            )?;
-            onpageshow.forget();
-        }
-    }
-
-    set_debug_mark(&window, "run:dom_ready");
 
     let canvas: HtmlCanvasElement = get_element(&document, "board")?;
     let ctx = canvas
@@ -430,38 +288,22 @@ fn start_app() -> Result<(), JsValue> {
         show_color_input(&palette_el, &color_input, selected);
     }
 
-    set_debug_mark(&window, "ws:url");
     let ws_url = websocket_url(&window)?;
     let kick_safari_ws = should_kick_safari_ws(&window);
-    set_debug_mark(&window, "ws:connecting");
-    web_sys::console::log_1(&format!("WS connecting url={ws_url}").into());
     let socket = Rc::new(WebSocket::new(&ws_url)?);
     let _ = Reflect::set(
         socket.as_ref(),
         &JsValue::from_str("binaryType"),
         &JsValue::from_str("arraybuffer"),
     );
-    set_debug_mark(&window, "ws:created");
-    web_sys::console::log_1(&format!("WS created ready_state={}", socket.ready_state()).into());
 
     let ws_open_reported = Rc::new(Cell::new(false));
 
     {
         let status_el = status_el.clone();
         let status_text = status_text.clone();
-        let socket_cb = socket.clone();
-        let ws_url = ws_url.clone();
-        let window_cb = window.clone();
         let ws_open_reported = ws_open_reported.clone();
         let onopen = Closure::<dyn FnMut(Event)>::new(move |_| {
-            set_debug_mark(&window_cb, "ws:open");
-            web_sys::console::log_1(
-                &format!(
-                    "WS open url={ws_url} ready_state={}",
-                    socket_cb.ready_state()
-                )
-                .into(),
-            );
             ws_open_reported.set(true);
             set_status(&status_el, &status_text, "open", "Live connection");
         });
@@ -472,25 +314,8 @@ fn start_app() -> Result<(), JsValue> {
     {
         let status_el = status_el.clone();
         let status_text = status_text.clone();
-        let socket_cb = socket.clone();
-        let ws_url = ws_url.clone();
-        let document_cb = document.clone();
-        let window_cb = window.clone();
         let ws_open_reported = ws_open_reported.clone();
-        let onclose = Closure::<dyn FnMut(CloseEvent)>::new(move |event: CloseEvent| {
-            set_debug_mark(&window_cb, "ws:close");
-            let hidden = document_hidden(&document_cb);
-            let visibility = document_visibility_state(&document_cb);
-            web_sys::console::warn_1(
-                &format!(
-                    "WS close url={ws_url} code={} was_clean={} reason={:?} ready_state={} hidden={hidden:?} visibility_state={visibility:?}",
-                    event.code(),
-                    event.was_clean(),
-                    event.reason(),
-                    socket_cb.ready_state()
-                )
-                .into(),
-            );
+        let onclose = Closure::<dyn FnMut(CloseEvent)>::new(move |_event: CloseEvent| {
             ws_open_reported.set(false);
             set_status(&status_el, &status_text, "closed", "Offline");
         });
@@ -501,20 +326,8 @@ fn start_app() -> Result<(), JsValue> {
     {
         let status_el = status_el.clone();
         let status_text = status_text.clone();
-        let socket_cb = socket.clone();
-        let ws_url = ws_url.clone();
-        let window_cb = window.clone();
         let ws_open_reported = ws_open_reported.clone();
         let onerror = Closure::<dyn FnMut(Event)>::new(move |_| {
-            set_debug_mark(&window_cb, "ws:error");
-            web_sys::console::error_1(
-                &format!(
-                    "WS error url={ws_url} ready_state={} buffered_amount={}",
-                    socket_cb.ready_state(),
-                    socket_cb.buffered_amount()
-                )
-                .into(),
-            );
             ws_open_reported.set(false);
             set_status(&status_el, &status_text, "closed", "Connection error");
         });
@@ -522,50 +335,13 @@ fn start_app() -> Result<(), JsValue> {
         onerror.forget();
     }
 
-    set_debug_mark(&window, "ws:handlers_set");
-
     if kick_safari_ws {
         let socket = socket.clone();
-        let ws_url = ws_url.clone();
         let window_cb = window.clone();
-        let debug = debug;
         let onkick = Closure::<dyn FnMut()>::new(move || {
-            if socket.ready_state() != WebSocket::CONNECTING {
-                return;
+            if socket.ready_state() == WebSocket::CONNECTING {
+                let _ = window_cb.fetch_with_str(&ping_url());
             }
-            let ping_url = ping_url();
-            if debug {
-                web_sys::console::log_1(
-                    &format!("WS kick fetch start url={ping_url} ws_url={ws_url}").into(),
-                );
-            }
-            let promise = window_cb.fetch_with_str(&ping_url);
-            if !debug {
-                return;
-            }
-
-            let ping_url_ok = ping_url.clone();
-            let on_ok = Closure::<dyn FnMut(JsValue)>::new(move |value: JsValue| {
-                let status = Reflect::get(&value, &JsValue::from_str("status"))
-                    .ok()
-                    .and_then(|v| v.as_f64());
-                let ok = Reflect::get(&value, &JsValue::from_str("ok"))
-                    .ok()
-                    .and_then(|v| v.as_bool());
-                web_sys::console::log_1(
-                    &format!("WS kick fetch ok url={ping_url_ok} status={status:?} ok={ok:?}")
-                        .into(),
-                );
-            });
-
-            let ping_url_err = ping_url.clone();
-            let on_err = Closure::<dyn FnMut(JsValue)>::new(move |_err: JsValue| {
-                web_sys::console::warn_1(&format!("WS kick fetch error url={ping_url_err}").into());
-            });
-
-            let _ = promise.then2(&on_ok, &on_err);
-            on_ok.forget();
-            on_err.forget();
         });
         let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
             onkick.as_ref().unchecked_ref(),
@@ -576,65 +352,11 @@ fn start_app() -> Result<(), JsValue> {
 
     {
         let socket = socket.clone();
-        let ws_url = ws_url.clone();
-        let ws_open_reported = ws_open_reported.clone();
-        let document_cb = document.clone();
         let window_cb = window.clone();
-        let debug = debug;
         let kick_safari_ws = kick_safari_ws;
         let ontimeout = Closure::<dyn FnMut()>::new(move || {
-            if socket.ready_state() == WebSocket::CONNECTING {
-                let hidden = document_hidden(&document_cb);
-                let visibility = document_visibility_state(&document_cb);
-                web_sys::console::warn_1(
-                    &format!(
-                        "WS still CONNECTING after 6s url={ws_url} ready_state={} buffered_amount={} open_reported={} hidden={hidden:?} visibility_state={visibility:?}",
-                        socket.ready_state(),
-                        socket.buffered_amount(),
-                        ws_open_reported.get(),
-                    )
-                    .into(),
-                );
-
-                if kick_safari_ws {
-                    let ping_url = ping_url();
-                    if debug {
-                        web_sys::console::log_1(
-                            &format!("WS kick fetch start (6s) url={ping_url}").into(),
-                        );
-                    }
-                    let promise = window_cb.fetch_with_str(&ping_url);
-                    if !debug {
-                        return;
-                    }
-
-                    let ping_url_ok = ping_url.clone();
-                    let on_ok = Closure::<dyn FnMut(JsValue)>::new(move |value: JsValue| {
-                        let status = Reflect::get(&value, &JsValue::from_str("status"))
-                            .ok()
-                            .and_then(|v| v.as_f64());
-                        let ok = Reflect::get(&value, &JsValue::from_str("ok"))
-                            .ok()
-                            .and_then(|v| v.as_bool());
-                        web_sys::console::log_1(
-                            &format!(
-                                "WS kick fetch ok (6s) url={ping_url_ok} status={status:?} ok={ok:?}"
-                            )
-                            .into(),
-                        );
-                    });
-
-                    let ping_url_err = ping_url.clone();
-                    let on_err = Closure::<dyn FnMut(JsValue)>::new(move |_err: JsValue| {
-                        web_sys::console::warn_1(
-                            &format!("WS kick fetch error (6s) url={ping_url_err}").into(),
-                        );
-                    });
-
-                    let _ = promise.then2(&on_ok, &on_err);
-                    on_ok.forget();
-                    on_err.forget();
-                }
+            if socket.ready_state() == WebSocket::CONNECTING && kick_safari_ws {
+                let _ = window_cb.fetch_with_str(&ping_url());
             }
         });
         let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
@@ -644,38 +366,9 @@ fn start_app() -> Result<(), JsValue> {
         ontimeout.forget();
     }
 
-    // Note: do NOT close the WebSocket on `pagehide`.
-    //
-    // On iPad Safari, `pagehide` can fire in situations where the user is merely switching tabs /
-    // apps, and closing the socket there can race with initial connection setup (leaving the UI
-    // stuck "Connecting…") or unnecessarily break a live session.
-    //
-    // If you need to debug `pagehide` behavior, use `?debug=1` and watch for the log below.
-    if debug {
-        let socket = socket.clone();
-        let ws_url = ws_url.clone();
-        let document_cb = document.clone();
-        let onpagehide = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
-            let persisted = page_transition_persisted(&event);
-            let hidden = document_hidden(&document_cb);
-            let visibility = document_visibility_state(&document_cb);
-            web_sys::console::log_1(
-                &format!(
-                    "pagehide url={ws_url} persisted={persisted:?} ready_state={} hidden={hidden:?} visibility_state={visibility:?} (no ws.close)",
-                    socket.ready_state(),
-                )
-                .into(),
-            );
-        });
-        window.add_event_listener_with_callback("pagehide", onpagehide.as_ref().unchecked_ref())?;
-        onpagehide.forget();
-    }
-
     {
         let socket = socket.clone();
-        let ws_url = ws_url.clone();
         let onbeforeunload = Closure::<dyn FnMut(Event)>::new(move |_| {
-            web_sys::console::log_1(&format!("beforeunload -> ws.close url={ws_url}").into());
             let _ = socket.close();
         });
         window.add_event_listener_with_callback(
@@ -685,26 +378,14 @@ fn start_app() -> Result<(), JsValue> {
         onbeforeunload.forget();
     }
 
-    set_debug_mark(&window, "ws:lifecycle_listeners_set");
-
     {
         let message_state = state.clone();
-        let message_count = Rc::new(Cell::new(0u32));
-        let message_count_cb = message_count.clone();
-        let window_cb = window.clone();
         let status_el = status_el.clone();
         let status_text = status_text.clone();
         let ws_open_reported = ws_open_reported.clone();
-        let ws_url = ws_url.clone();
         let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
             if !ws_open_reported.get() {
                 ws_open_reported.set(true);
-                if debug {
-                    set_debug_mark(&window_cb, "ws:open:via_message");
-                    web_sys::console::warn_1(
-                        &format!("WS message arrived before onopen url={ws_url}").into(),
-                    );
-                }
                 set_status(&status_el, &status_text, "open", "Live connection");
             }
 
@@ -746,23 +427,9 @@ fn start_app() -> Result<(), JsValue> {
                 return;
             };
 
-            let count = message_count_cb.get() + 1;
-            message_count_cb.set(count);
-            if debug && count <= 8 {
-                web_sys::console::log_1(
-                    &format!("WS message #{count} type={}", server_message_kind(&message)).into(),
-                );
-            }
-
             let mut state = message_state.borrow_mut();
             match message {
                 ServerMessage::Sync { strokes } => {
-                    set_debug_mark(&window_cb, "ws:message:sync");
-                    if debug {
-                        web_sys::console::log_1(
-                            &format!("WS sync strokes={}", strokes.len()).into(),
-                        );
-                    }
                     adopt_strokes(&mut state, strokes);
                 }
                 ServerMessage::StrokeStart {
@@ -771,48 +438,34 @@ fn start_app() -> Result<(), JsValue> {
                     size,
                     point,
                 } => {
-                    set_debug_mark(&window_cb, "ws:message:stroke:start");
                     start_stroke(&mut state, id, color, size, point);
                 }
                 ServerMessage::StrokeMove { id, point } => {
-                    set_debug_mark(&window_cb, "ws:message:stroke:move");
                     let _ = move_stroke(&mut state, &id, point);
                 }
                 ServerMessage::StrokePoints { id, points } => {
-                    set_debug_mark(&window_cb, "ws:message:stroke:points");
                     for point in points {
                         let _ = move_stroke(&mut state, &id, point);
                     }
                 }
                 ServerMessage::StrokeEnd { id } => {
-                    set_debug_mark(&window_cb, "ws:message:stroke:end");
                     end_stroke(&mut state, &id);
                 }
                 ServerMessage::Clear => {
-                    set_debug_mark(&window_cb, "ws:message:clear");
                     clear_board(&mut state);
                 }
                 ServerMessage::StrokeRemove { id } => {
-                    set_debug_mark(&window_cb, "ws:message:stroke:remove");
                     remove_stroke(&mut state, &id);
                     redraw(&mut state);
                 }
                 ServerMessage::StrokeRestore { stroke } => {
-                    set_debug_mark(&window_cb, "ws:message:stroke:restore");
                     restore_stroke(&mut state, stroke);
                 }
                 ServerMessage::StrokeReplace { stroke } => {
-                    set_debug_mark(&window_cb, "ws:message:stroke:replace");
                     replace_stroke_local(&mut state, stroke);
                     redraw(&mut state);
                 }
                 ServerMessage::TransformUpdate { ids, op } => {
-                    set_debug_mark(&window_cb, "ws:message:transform:update");
-                    if debug {
-                        web_sys::console::log_1(
-                            &format!("WS transform:update ids={} op={op:?}", ids.len()).into(),
-                        );
-                    }
                     apply_transform_operation(&mut state, &ids, &op);
                     redraw(&mut state);
                 }
@@ -822,13 +475,10 @@ fn start_app() -> Result<(), JsValue> {
         onmessage.forget();
     }
 
-    set_debug_mark(&window, "ws:onmessage_set");
-
     let pending_points = Rc::new(RefCell::new(HashMap::<StrokeId, Vec<Point>>::new()));
     let flush_scheduled = Rc::new(Cell::new(false));
     let active_draw_pointer: Rc<Cell<Option<i32>>> = Rc::new(Cell::new(None));
     let active_draw_timestamp = Rc::new(Cell::new(0.0));
-    let pointer_move_marked = Rc::new(Cell::new(false));
     let schedule_flush: Rc<dyn Fn()> = Rc::new({
         let pending_points = pending_points.clone();
         let flush_scheduled = flush_scheduled.clone();
@@ -1381,9 +1031,7 @@ fn start_app() -> Result<(), JsValue> {
         let down_size = size_input.clone();
         let down_active_draw_pointer = active_draw_pointer.clone();
         let down_active_draw_timestamp = active_draw_timestamp.clone();
-        let down_window = window.clone();
         let ondown = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
-            set_debug_mark(&down_window, "pointer:down");
             if event.button() != 0 {
                 return;
             }
@@ -1635,12 +1283,7 @@ fn start_app() -> Result<(), JsValue> {
         let move_schedule_flush = schedule_flush.clone();
         let move_active_draw_pointer = active_draw_pointer.clone();
         let move_active_draw_timestamp = active_draw_timestamp.clone();
-        let move_window = window.clone();
-        let move_marked = pointer_move_marked.clone();
         let onmove = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
-            if !move_marked.replace(true) {
-                set_debug_mark(&move_window, "pointer:move");
-            }
             for event in coalesced_pointer_events(&event) {
                 if is_touch_event(&event) {
                     let mut state = move_state.borrow_mut();
@@ -1926,11 +1569,7 @@ fn start_app() -> Result<(), JsValue> {
         let stop_pending_points = pending_points.clone();
         let stop_active_draw_pointer = active_draw_pointer.clone();
         let stop_active_draw_timestamp = active_draw_timestamp.clone();
-        let stop_window = window.clone();
-        let stop_marked = pointer_move_marked.clone();
         let onstop = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
-            set_debug_mark(&stop_window, "pointer:stop");
-            stop_marked.set(false);
             let mut state = stop_state.borrow_mut();
             if is_touch_event(&event) {
                 state.touch_points.remove(&event.pointer_id());
@@ -2071,6 +1710,5 @@ fn start_app() -> Result<(), JsValue> {
         onwheel.forget();
     }
 
-    set_debug_mark(&window, "run:ready");
     Ok(())
 }
