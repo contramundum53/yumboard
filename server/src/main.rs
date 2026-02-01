@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use axum::http::header::{CACHE_CONTROL, EXPIRES, PRAGMA};
 use axum::http::HeaderValue;
-use axum::routing::{any, get};
+use axum::routing::get;
 use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
 use clap::Parser;
@@ -42,10 +42,6 @@ struct Args {
     // Interval (in seconds) for periodic backups
     #[arg(long, default_value_t = 60u64)]
     backup_interval: u64,
-
-    /// Disable HTTP/2 and serve only HTTP/1.1 (helps debug iOS Safari WebSocket issues).
-    #[arg(long, default_value_t = false)]
-    http1_only: bool,
 
     #[arg(long, default_value_t = 3000)]
     port: u16,
@@ -134,7 +130,7 @@ async fn main() {
         .route("/ping", get(ping_handler))
         .route("/", get(root_handler))
         .route("/s/:session_id", get(session_handler))
-        .route("/ws/:session_id", any(ws_handler))
+        .route("/ws/:session_id", get(ws_handler))
         .fallback_service(ServeDir::new(public_dir).append_index_html_on_directories(true))
         .layer(SetResponseHeaderLayer::if_not_present(
             CACHE_CONTROL,
@@ -174,19 +170,7 @@ async fn main() {
         let config = RustlsConfig::from_pem_file(cert, key)
             .await
             .expect("Failed to load TLS certificate/key");
-        let config = if args.http1_only {
-            let mut server_config = (*config.get_inner()).clone();
-            server_config.alpn_protocols = vec![b"http/1.1".to_vec()];
-            RustlsConfig::from_config(Arc::new(server_config))
-        } else {
-            config
-        };
         let server = axum_server::bind_rustls(addr, config);
-        let server = if args.http1_only {
-            server.http1_only()
-        } else {
-            server
-        };
         server
             .serve(app.into_make_service())
             .await

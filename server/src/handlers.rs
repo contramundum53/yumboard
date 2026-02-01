@@ -1,9 +1,7 @@
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{FromRequestParts, Path, State};
-use axum::http::header::{ORIGIN, USER_AGENT};
-use axum::http::Method;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Redirect};
 use futures_util::{SinkExt, StreamExt};
@@ -44,69 +42,16 @@ pub async fn session_handler(
 pub async fn ws_handler(
     Path(session_id): Path<String>,
     State(state): State<AppState>,
-    request: axum::extract::Request,
+    ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     let session_id = match normalize_session_id(&session_id) {
         Some(id) => id,
         None => return StatusCode::NOT_FOUND.into_response(),
     };
-
-    let (mut parts, _) = request.into_parts();
-    let method = parts.method.clone();
-    let uri = parts.uri.clone();
-    let version = parts.version;
-    let headers = parts.headers.clone();
-
-    let client_id = uri.query().and_then(|query| {
-        query.split('&').find_map(|pair| {
-            let mut parts = pair.splitn(2, '=');
-            let key = parts.next()?;
-            let value = parts.next().unwrap_or_default();
-            if key == "client" && !value.is_empty() {
-                Some(value.to_string())
-            } else {
-                None
-            }
-        })
-    });
-    let user_agent = headers
-        .get(USER_AGENT)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("-");
-    let origin = headers
-        .get(ORIGIN)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("-");
-
-    eprintln!(
-        "WS request session={session_id} client={client_id:?} method={method:?} version={version:?} uri={uri} ua={user_agent:?} origin={origin:?}",
-    );
-
-    if method != Method::GET {
-        eprintln!("WS reject session={session_id} client={client_id:?} reason=method_not_allowed method={method:?}");
-        return StatusCode::METHOD_NOT_ALLOWED.into_response();
-    }
-
-    match WebSocketUpgrade::from_request_parts(&mut parts, &state).await {
-        Ok(ws) => {
-            eprintln!("WS upgrade ok session={session_id} client={client_id:?}");
-            ws.on_upgrade(move |socket| handle_socket(socket, state, session_id, client_id))
-        }
-        Err(rejection) => {
-            eprintln!(
-                "WS upgrade rejected session={session_id} client={client_id:?} method={method:?} version={version:?} uri={uri} error={rejection:?}"
-            );
-            rejection.into_response()
-        }
-    }
+    ws.on_upgrade(move |socket| handle_socket(socket, state, session_id))
 }
 
-async fn handle_socket(
-    socket: WebSocket,
-    state: AppState,
-    session_id: String,
-    client_id: Option<String>,
-) {
+async fn handle_socket(socket: WebSocket, state: AppState, session_id: String) {
     let (mut socket_sender, mut socket_receiver) = socket.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<ServerMessage>();
     let connection_id = Uuid::new_v4();
@@ -119,7 +64,7 @@ async fn handle_socket(
             .histories
             .insert(connection_id, crate::state::ClientHistory::default());
         eprintln!(
-            "WS connected session={session_id} client={client_id:?} conn={connection_id} peers={}",
+            "WS connected session={session_id} conn={connection_id} peers={}",
             session.peers.len()
         );
     }
@@ -133,18 +78,16 @@ async fn handle_socket(
         bincode::config::standard(),
     ) {
         eprintln!(
-            "WS sync send session={session_id} client={client_id:?} conn={connection_id} strokes={strokes_len} bytes={}",
+            "WS sync send session={session_id} conn={connection_id} strokes={strokes_len} bytes={}",
             sync_payload.len()
         );
         if let Err(error) = socket_sender.send(Message::Binary(sync_payload)).await {
             eprintln!(
-                "WS sync send failed session={session_id} client={client_id:?} conn={connection_id} error={error:?}"
+                "WS sync send failed session={session_id} conn={connection_id} error={error:?}"
             );
         }
     } else {
-        eprintln!(
-            "WS sync serialize failed session={session_id} client={client_id:?} conn={connection_id}"
-        );
+        eprintln!("WS sync serialize failed session={session_id} conn={connection_id}");
     }
 
     let send_task = tokio::spawn(async move {
@@ -214,12 +157,12 @@ async fn handle_socket(
         session.histories.remove(&connection_id);
         session.transform_sessions.remove(&connection_id);
         eprintln!(
-            "WS disconnected session={session_id} client={client_id:?} conn={connection_id} peers={}",
+            "WS disconnected session={session_id} conn={connection_id} peers={}",
             session.peers.len()
         );
         if let Some(frame) = &close_frame {
             eprintln!(
-                "WS close frame session={session_id} client={client_id:?} conn={connection_id} code={:?} reason={:?}",
+                "WS close frame session={session_id} conn={connection_id} code={:?} reason={:?}",
                 frame.code, frame.reason
             );
         }
