@@ -18,9 +18,8 @@ pub enum WsEvent {
     Message(ServerMessage),
 }
 
-#[derive(Clone)]
 pub struct WsSender {
-    socket: Rc<WebSocket>,
+    socket: WebSocket,
 }
 
 impl WsSender {
@@ -69,18 +68,18 @@ fn ping_url() -> String {
 pub fn connect_ws(
     window: &Window,
     on_event: impl 'static + FnMut(WsEvent),
-) -> Result<WsSender, JsValue> {
+) -> Result<Rc<WsSender>, JsValue> {
     let ws_url = websocket_url(window)?;
-    let socket = Rc::new(WebSocket::new(&ws_url)?);
+    let socket = WebSocket::new(&ws_url)?;
     let _ = Reflect::set(
         socket.as_ref(),
         &JsValue::from_str("binaryType"),
         &JsValue::from_str("arraybuffer"),
     );
 
-    let sender = WsSender {
+    let sender = Rc::new(WsSender {
         socket: socket.clone(),
-    };
+    });
 
     let on_event = Rc::new(RefCell::new(on_event));
     let open_reported = Rc::new(Cell::new(false));
