@@ -1,4 +1,4 @@
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
@@ -233,10 +233,10 @@ fn start_app() -> Result<(), JsValue> {
             mode: DrawMode::Idle,
             palette_selected: 0,
         }),
-        pending_points: Rc::new(RefCell::new(HashMap::new())),
-        flush_scheduled: Rc::new(Cell::new(false)),
-        active_draw_pointer: Rc::new(Cell::new(None)),
-        active_draw_timestamp: Rc::new(Cell::new(0.0)),
+        pending_points: HashMap::new(),
+        flush_scheduled: false,
+        active_draw_pointer: None,
+        active_draw_timestamp: 0.0,
         touch_points: HashMap::new(),
         pinch: None,
         touch_pan: None,
@@ -322,27 +322,26 @@ fn start_app() -> Result<(), JsValue> {
         }
     })?;
 
-    let pending_points = state.borrow().pending_points.clone();
-    let flush_scheduled = state.borrow().flush_scheduled.clone();
-    let active_draw_pointer = state.borrow().active_draw_pointer.clone();
-    let active_draw_timestamp = state.borrow().active_draw_timestamp.clone();
     let schedule_flush: Rc<dyn Fn()> = Rc::new({
-        let pending_points = pending_points.clone();
-        let flush_scheduled = flush_scheduled.clone();
+        let state = state.clone();
         let sender = ws_sender.clone();
         let window = window.clone();
         move || {
-            if flush_scheduled.replace(true) {
-                return;
+            {
+                let mut state = state.borrow_mut();
+                if state.flush_scheduled {
+                    return;
+                }
+                state.flush_scheduled = true;
             }
-            let pending_points = pending_points.clone();
-            let flush_scheduled = flush_scheduled.clone();
+            let state = state.clone();
             let sender = sender.clone();
             let cb = Closure::once_into_js(move |_: f64| {
-                flush_scheduled.set(false);
-                let mut pending_guard = pending_points.borrow_mut();
-                let pending = std::mem::take(&mut *pending_guard);
-                drop(pending_guard);
+                let pending = {
+                    let mut state = state.borrow_mut();
+                    state.flush_scheduled = false;
+                    std::mem::take(&mut state.pending_points)
+                };
                 for (id, mut points) in pending {
                     const MAX_POINTS_PER_MESSAGE: usize = 128;
                     while !points.is_empty() {
@@ -892,8 +891,6 @@ fn start_app() -> Result<(), JsValue> {
         let down_canvas = canvas.clone();
         let down_color = color_input.clone();
         let down_size = size_input.clone();
-        let down_active_draw_pointer = active_draw_pointer.clone();
-        let down_active_draw_timestamp = active_draw_timestamp.clone();
         let ondown = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             if event.button() != 0 {
                 return;
@@ -929,8 +926,8 @@ fn start_app() -> Result<(), JsValue> {
                             draw.mode = DrawMode::Idle;
                             end_stroke(&mut state, &id);
                             down_sender.send(&ClientMessage::StrokeEnd { id });
-                            down_active_draw_pointer.set(None);
-                            down_active_draw_timestamp.set(0.0);
+                            state.active_draw_pointer = None;
+                            state.active_draw_timestamp = 0.0;
                         }
                     }
                     let _ = down_canvas.set_pointer_capture(event.pointer_id());
@@ -1117,8 +1114,8 @@ fn start_app() -> Result<(), JsValue> {
                     let color = parse_color(&down_color.value());
                     let size = sanitize_size(down_size.value_as_number() as f32);
 
-                    down_active_draw_pointer.set(Some(event.pointer_id()));
-                    down_active_draw_timestamp.set(event.time_stamp());
+                    state.active_draw_pointer = Some(event.pointer_id());
+                    state.active_draw_timestamp = event.time_stamp();
 
                     draw.mode = DrawMode::Drawing { id: id.clone() };
                     state.mode = Mode::Draw(draw);
@@ -1142,10 +1139,7 @@ fn start_app() -> Result<(), JsValue> {
         let move_state = state.clone();
         let move_sender = ws_sender.clone();
         let move_canvas = canvas.clone();
-        let move_pending_points = pending_points.clone();
         let move_schedule_flush = schedule_flush.clone();
-        let move_active_draw_pointer = active_draw_pointer.clone();
-        let move_active_draw_timestamp = active_draw_timestamp.clone();
         let onmove = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             for event in coalesced_pointer_events(&event) {
                 if is_touch_event(&event) {
@@ -1401,24 +1395,20 @@ fn start_app() -> Result<(), JsValue> {
                             DrawMode::Drawing { id } => id.clone(),
                             _ => continue,
                         };
-                        if move_active_draw_pointer.get() != Some(event.pointer_id()) {
+                        if state.active_draw_pointer != Some(event.pointer_id()) {
                             continue;
                         }
                         let timestamp = event.time_stamp();
-                        if timestamp < move_active_draw_timestamp.get() {
+                        if timestamp < state.active_draw_timestamp {
                             continue;
                         }
-                        move_active_draw_timestamp.set(timestamp);
+                        state.active_draw_timestamp = timestamp;
                         let point = match event_to_point(&move_canvas, &event, pan_x, pan_y, zoom) {
                             Some(point) => point,
                             None => continue,
                         };
                         if move_stroke(&mut state, &id, point) {
-                            move_pending_points
-                                .borrow_mut()
-                                .entry(id)
-                                .or_default()
-                                .push(point);
+                            state.pending_points.entry(id).or_default().push(point);
                             move_schedule_flush();
                         }
                     }
@@ -1438,9 +1428,6 @@ fn start_app() -> Result<(), JsValue> {
         let stop_state = state.clone();
         let stop_sender = ws_sender.clone();
         let stop_canvas = canvas.clone();
-        let stop_pending_points = pending_points.clone();
-        let stop_active_draw_pointer = active_draw_pointer.clone();
-        let stop_active_draw_timestamp = active_draw_timestamp.clone();
         let onstop = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             let mut state = stop_state.borrow_mut();
             if is_touch_event(&event) {
@@ -1474,7 +1461,8 @@ fn start_app() -> Result<(), JsValue> {
             if stop_canvas.has_pointer_capture(event.pointer_id()) {
                 let _ = stop_canvas.release_pointer_capture(event.pointer_id());
             }
-            match &mut state.mode {
+            let mode = std::mem::replace(&mut state.mode, Mode::Pan(PanMode::Idle));
+            match mode {
                 Mode::Select(select) => {
                     let end_ids = match select.mode {
                         SelectMode::Move { .. }
@@ -1482,7 +1470,14 @@ fn start_app() -> Result<(), JsValue> {
                         | SelectMode::Rotate { .. } => Some(select.selected_ids.clone()),
                         _ => None,
                     };
-                    if matches!(select.mode, SelectMode::Lasso { .. }) {
+                    state.mode = Mode::Select(select);
+                    if matches!(
+                        state.mode,
+                        Mode::Select(SelectState {
+                            mode: SelectMode::Lasso { .. },
+                            ..
+                        })
+                    ) {
                         finalize_lasso_selection(&mut state);
                     }
                     if let Mode::Select(select) = &mut state.mode {
@@ -1503,20 +1498,25 @@ fn start_app() -> Result<(), JsValue> {
                     state.mode = Mode::Pan(PanMode::Idle);
                     set_canvas_mode(&state.canvas, &state.mode, false);
                 }
-                Mode::Draw(draw) => {
-                    if stop_active_draw_pointer.get() != Some(event.pointer_id()) {
+                Mode::Draw(mut draw) => {
+                    if state.active_draw_pointer != Some(event.pointer_id()) {
+                        state.mode = Mode::Draw(draw);
                         return;
                     }
-                    stop_active_draw_pointer.set(None);
-                    stop_active_draw_timestamp.set(0.0);
+                    state.active_draw_pointer = None;
+                    state.active_draw_timestamp = 0.0;
                     let id = match &draw.mode {
                         DrawMode::Drawing { id } => id.clone(),
-                        _ => return,
+                        _ => {
+                            state.mode = Mode::Draw(draw);
+                            return;
+                        }
                     };
                     draw.mode = DrawMode::Idle;
+                    state.mode = Mode::Draw(draw);
                     end_stroke(&mut state, &id);
-                    drop(state);
-                    if let Some(mut points) = stop_pending_points.borrow_mut().remove(&id) {
+                    if let Some(mut points) = state.pending_points.remove(&id) {
+                        drop(state);
                         const MAX_POINTS_PER_MESSAGE: usize = 128;
                         while !points.is_empty() {
                             let chunk_size = points.len().min(MAX_POINTS_PER_MESSAGE);
@@ -1526,10 +1526,14 @@ fn start_app() -> Result<(), JsValue> {
                                 points: chunk,
                             });
                         }
+                    } else {
+                        drop(state);
                     }
                     stop_sender.send(&ClientMessage::StrokeEnd { id });
                 }
-                _ => {}
+                other => {
+                    state.mode = other;
+                }
             }
         });
         canvas.add_event_listener_with_callback("pointerup", onstop.as_ref().unchecked_ref())?;
