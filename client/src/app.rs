@@ -246,8 +246,12 @@ fn start_app() -> Result<(), JsValue> {
 
     {
         let ws_sender = ws_sender.clone();
+        let ui_callback = ui.clone();
         let onclick = Closure::<dyn FnMut()>::new(move || {
-            let _ = ws_sender.reconnect();
+            ui_callback.hide_reload_banner();
+            if ws_sender.reconnect().is_err() {
+                ui_callback.show_reload_banner("Connection error. Please reload the page.");
+            }
         });
         ui.reload_button
             .set_onclick(Some(onclick.as_ref().unchecked_ref()));
