@@ -110,8 +110,6 @@ fn start_app() -> Result<(), JsValue> {
         .ok_or_else(|| JsValue::from_str("Missing document"))?;
     let ui = Rc::new(Ui::from_document(document)?);
 
-    let ctx = ui.ctx.clone();
-
     let state = Rc::new(RefCell::new(State {
         strokes: Vec::new(),
         active_ids: HashSet::new(),
@@ -158,7 +156,7 @@ fn start_app() -> Result<(), JsValue> {
     let ws_sender = connect_ws(&window, {
         let ui = ui.clone();
         let message_state = state.clone();
-        let ctx = ctx.clone();
+        let ctx = ui.ctx.clone();
         move |event: WsEvent| match event {
             WsEvent::Open => {
                 ui.set_status("open", "Live connection");
@@ -220,7 +218,7 @@ fn start_app() -> Result<(), JsValue> {
         let resize_state = state.clone();
         let window_cb = window.clone();
         let ui = ui.clone();
-        let ctx_cb = ctx.clone();
+        let ctx_cb = ui.ctx.clone();
         let onresize = Closure::<dyn FnMut()>::new(move || {
             let mut state = resize_state.borrow_mut();
             resize_canvas(&window_cb, &ui.canvas, &ctx_cb, &mut state);
@@ -232,7 +230,7 @@ fn start_app() -> Result<(), JsValue> {
     {
         let key_sender = ws_sender.clone();
         let key_state = state.clone();
-        let key_ctx = ctx.clone();
+        let key_ctx = ui.ctx.clone();
         let onkeydown = Closure::<dyn FnMut(KeyboardEvent)>::new(move |event: KeyboardEvent| {
             if !key_sender.is_open() {
                 return;
@@ -286,7 +284,7 @@ fn start_app() -> Result<(), JsValue> {
 
     {
         let mut state = state.borrow_mut();
-        resize_canvas(&window, &ui.canvas, &ctx, &mut state);
+        resize_canvas(&window, &ui.canvas, &ui.ctx, &mut state);
     }
 
     {
@@ -373,7 +371,7 @@ fn start_app() -> Result<(), JsValue> {
 
     {
         let home_state = state.clone();
-        let home_ctx = ctx.clone();
+        let home_ctx = ui.ctx.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = home_state.borrow_mut();
             if matches!(state.mode, Mode::Loading(_)) {
@@ -484,7 +482,7 @@ fn start_app() -> Result<(), JsValue> {
     {
         let clear_state = state.clone();
         let clear_sender = ws_sender.clone();
-        let clear_ctx = ctx.clone();
+        let clear_ctx = ui.ctx.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             if !clear_sender.is_open() {
                 return;
@@ -639,7 +637,7 @@ fn start_app() -> Result<(), JsValue> {
         let ui_callback = ui.clone();
         let load_state_onchange = state.clone();
         let load_sender_onchange = ws_sender.clone();
-        let load_ctx = ctx.clone();
+        let load_ctx = ui.ctx.clone();
         let onchange = Closure::<dyn FnMut(Event)>::new(move |_| {
             if !load_sender_onchange.is_open() {
                 return;
@@ -711,7 +709,7 @@ fn start_app() -> Result<(), JsValue> {
         let down_state = state.clone();
         let down_sender = ws_sender.clone();
         let ui_callback = ui.clone();
-        let down_ctx = ctx.clone();
+        let down_ctx = ui.ctx.clone();
         let ondown = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             if event.button() != 0 {
                 return;
@@ -971,7 +969,7 @@ fn start_app() -> Result<(), JsValue> {
         let move_sender = ws_sender.clone();
         let ui_callback = ui.clone();
         let move_window = window.clone();
-        let move_ctx = ctx.clone();
+        let move_ctx = ui.ctx.clone();
         let onmove = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             for event in coalesced_pointer_events(&event) {
                 if is_touch_event(&event) {
@@ -1272,7 +1270,7 @@ fn start_app() -> Result<(), JsValue> {
         let stop_state = state.clone();
         let stop_sender = ws_sender.clone();
         let ui_callback = ui.clone();
-        let stop_ctx = ctx.clone();
+        let stop_ctx = ui.ctx.clone();
         let onstop = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             let mut state = stop_state.borrow_mut();
             if is_touch_event(&event) {
@@ -1401,7 +1399,7 @@ fn start_app() -> Result<(), JsValue> {
     {
         let zoom_state = state.clone();
         let ui_callback = ui.clone();
-        let zoom_ctx = ctx.clone();
+        let zoom_ctx = ui.ctx.clone();
         let onwheel = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
             let wheel_event = match event.dyn_into::<web_sys::WheelEvent>() {
                 Ok(event) => event,
