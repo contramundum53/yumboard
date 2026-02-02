@@ -9,6 +9,7 @@ axum = { version = "0.7", features = ["ws"] }
 async-trait = "0.1"
 bincode = { version = "2", features = ["serde", "derive"] }
 aws-config = "1"
+aws-credential-types = "1"
 aws-sdk-s3 = "1"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }

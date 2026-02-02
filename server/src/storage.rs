@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use crate::state::PersistentSessionData;
 use async_trait::async_trait;
 use aws_config::BehaviorVersion;
+use aws_credential_types::Credentials;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client;
 
@@ -50,16 +51,16 @@ fn decode_data(payload: &[u8]) -> Option<PersistentSessionData> {
 }
 
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub struct S3StorageConfig {
     pub bucket: String,
     pub prefix: Option<String>,
     pub region: Option<String>,
     pub endpoint_url: Option<String>,
     pub force_path_style: bool,
+    pub access_key_id: Option<String>,
+    pub secret_access_key: Option<String>,
 }
 
-#[allow(dead_code)]
 impl S3StorageConfig {
     pub fn new(bucket: impl Into<String>) -> Self {
         Self {
@@ -68,21 +69,28 @@ impl S3StorageConfig {
             region: None,
             endpoint_url: None,
             force_path_style: false,
+            access_key_id: None,
+            secret_access_key: None,
         }
     }
 }
 
-#[allow(dead_code)]
 pub struct S3Storage {
     bucket: String,
     prefix: String,
     client: Client,
 }
 
-#[allow(dead_code)]
 impl S3Storage {
     pub async fn new(config: S3StorageConfig) -> Self {
         let mut loader = aws_config::defaults(BehaviorVersion::latest());
+        if let (Some(access_key_id), Some(secret_access_key)) = (
+            config.access_key_id.clone(),
+            config.secret_access_key.clone(),
+        ) {
+            let creds = Credentials::new(access_key_id, secret_access_key, None, None, "static");
+            loader = loader.credentials_provider(creds);
+        }
         if let Some(region) = config.region.clone() {
             loader = loader.region(aws_config::Region::new(region));
         }

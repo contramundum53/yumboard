@@ -20,14 +20,25 @@ mod storage;
 use crate::handlers::{ping_handler, root_handler, session_handler, ws_handler};
 use crate::sessions::save_session;
 use crate::state::AppState;
-use crate::storage::FileStorage;
+use crate::storage::{FileStorage, S3Storage, S3StorageConfig, Storage};
 
 #[derive(Parser)]
 #[command(author, version, about)]
 struct Args {
-    // Directory to store session data
+    // Directory to store session data (or s3://bucket/prefix when S3 flags are set)
     #[arg(long)]
-    sessions_dir: Option<PathBuf>,
+    sessions_dir: Option<String>,
+
+    // S3 credentials/access for session storage
+    #[arg(long)]
+    aws_access_key_id: Option<String>,
+
+    #[arg(long)]
+    aws_secret_access_key: Option<String>,
+
+    // S3-compatible endpoint URL (enables S3 storage when set)
+    #[arg(long)]
+    s3_endpoint: Option<String>,
 
     // Directory to serve static files from
     #[arg(long)]
@@ -104,14 +115,26 @@ async fn shutdown_signal(app_state: AppState) {
     std::process::exit(0);
 }
 
+fn parse_s3_url(value: &str) -> Option<(String, String)> {
+    let trimmed = value.trim();
+    let rest = trimmed.strip_prefix("s3://")?;
+    let mut parts = rest.splitn(2, '/');
+    let bucket = parts.next()?.trim();
+    if bucket.is_empty() {
+        return None;
+    }
+    let prefix = parts.next().unwrap_or("").trim_matches('/').to_string();
+    Some((bucket.to_string(), prefix))
+}
+
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
-    let session_dir = args
-        .sessions_dir
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../sessions"));
-    if let Err(error) = tokio::fs::create_dir_all(&session_dir).await {
-        eprintln!("Failed to create session dir: {error}");
+    let use_s3 = args.aws_access_key_id.is_some()
+        || args.aws_secret_access_key.is_some()
+        || args.s3_endpoint.is_some();
+    if args.aws_access_key_id.is_some() ^ args.aws_secret_access_key.is_some() {
+        panic!("Both --aws-access-key-id and --aws-secret-access-key must be provided together.");
     }
     let public_dir = args
         .public_dir
@@ -120,9 +143,35 @@ async fn main() {
 
     let backup_interval = args.backup_interval;
 
+    let storage: Arc<dyn Storage> = if use_s3 {
+        let sessions_dir = args
+            .sessions_dir
+            .as_deref()
+            .expect("--sessions-dir must be set to an s3:// URL when using S3 storage");
+        let (bucket, prefix) = parse_s3_url(sessions_dir)
+            .unwrap_or_else(|| panic!("Invalid S3 URL for --sessions-dir: {sessions_dir}"));
+        let mut config = S3StorageConfig::new(bucket);
+        if !prefix.is_empty() {
+            config.prefix = Some(prefix);
+        }
+        config.endpoint_url = args.s3_endpoint.clone();
+        config.access_key_id = args.aws_access_key_id.clone();
+        config.secret_access_key = args.aws_secret_access_key.clone();
+        Arc::new(S3Storage::new(config).await)
+    } else {
+        let session_dir = args
+            .sessions_dir
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../sessions"));
+        if let Err(error) = tokio::fs::create_dir_all(&session_dir).await {
+            eprintln!("Failed to create session dir: {error}");
+        }
+        Arc::new(FileStorage::new(session_dir))
+    };
+
     let state = AppState {
         sessions: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
-        storage: Arc::new(FileStorage::new(session_dir)),
+        storage,
     };
 
     let backup_state = state.clone();
