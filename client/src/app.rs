@@ -153,18 +153,37 @@ fn start_app() -> Result<(), JsValue> {
         ui.show_color_input(selected);
     }
 
+    let ws_offline_prompted = Rc::new(std::cell::Cell::new(false));
     let ws_sender = connect_ws(&window, {
         let ui = ui.clone();
         let message_state = state.clone();
+        let window = window.clone();
+        let ws_offline_prompted = ws_offline_prompted.clone();
         move |event: WsEvent| match event {
             WsEvent::Open => {
                 ui.set_status("open", "Live connection");
             }
             WsEvent::Close => {
                 ui.set_status("closed", "Offline");
+                if !ws_offline_prompted.replace(true) {
+                    if window
+                        .confirm_with_message("Connection lost. Please reload the page.")
+                        .unwrap_or(false)
+                    {
+                        let _ = window.location().reload();
+                    }
+                }
             }
             WsEvent::Error => {
                 ui.set_status("closed", "Connection error");
+                if !ws_offline_prompted.replace(true) {
+                    if window
+                        .confirm_with_message("Connection error. Please reload the page.")
+                        .unwrap_or(false)
+                    {
+                        let _ = window.location().reload();
+                    }
+                }
             }
             WsEvent::Message(message) => {
                 let mut state = message_state.borrow_mut();
