@@ -21,11 +21,16 @@ pub async fn get_or_create_session(
         return session;
     }
     eprintln!("Loading/Creating session {session_id}...");
-    let data = state
-        .storage
-        .load_session(session_id)
-        .await
-        .unwrap_or_default();
+    let res = state.storage.load_session(session_id).await;
+
+    let data = match res {
+        Ok(data) => data,
+        Err(err) => {
+            eprintln!("Could not load session {session_id}: {err}\nCreating new session.");
+            PersistentSessionData::default()
+        }
+    };
+
     let sanitized = PersistentSessionData {
         strokes: sanitize_strokes(data.strokes),
     };

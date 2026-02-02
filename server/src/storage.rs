@@ -6,7 +6,6 @@ use aws_config::BehaviorVersion;
 use aws_credential_types::Credentials;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client;
-use yumboard_shared::Stroke;
 
 const SESSION_FILE_MAGIC: [u8; 4] = *b"YBSS";
 const SESSION_FILE_VERSION: u32 = 1;
@@ -14,7 +13,7 @@ const SESSION_HEADER_LEN: usize = 8;
 
 #[async_trait]
 pub trait Storage: Send + Sync {
-    async fn load_session(&self, session_id: &str) -> Option<PersistentSessionData>;
+    async fn load_session(&self, session_id: &str) -> Result<PersistentSessionData, String>;
     async fn save_session(&self, session_id: &str, data: &PersistentSessionData);
 }
 
@@ -30,9 +29,11 @@ impl FileStorage {
 
 #[async_trait]
 impl Storage for FileStorage {
-    async fn load_session(&self, session_id: &str) -> Option<PersistentSessionData> {
+    async fn load_session(&self, session_id: &str) -> Result<PersistentSessionData, String> {
         let path = self.session_dir.join(format!("{session_id}.bin"));
-        let payload = tokio::fs::read(path).await.ok()?;
+        let payload = tokio::fs::read(path)
+            .await
+            .map_err(|e| format!("Failed to read session file for {session_id}: {e}"))?;
         decode_data(&payload)
     }
 
@@ -54,50 +55,23 @@ fn encode_data(data: &PersistentSessionData) -> Vec<u8> {
     payload
 }
 
-fn decode_data(payload: &[u8]) -> Option<PersistentSessionData> {
-    if payload.len() >= SESSION_HEADER_LEN && payload.starts_with(&SESSION_FILE_MAGIC) {
-        let version = u32::from_le_bytes(payload[4..8].try_into().ok()?);
-        let body = &payload[SESSION_HEADER_LEN..];
-        return match version {
-            1 => bincode::decode_from_slice(body, bincode::config::standard())
-                .map(|(data, _)| data)
-                .ok(),
-            _ => {
-                eprintln!("Unsupported session file version: {version}");
-                None
-            }
-        };
+fn decode_data(payload: &[u8]) -> Result<PersistentSessionData, String> {
+    if !(payload.starts_with(&SESSION_FILE_MAGIC) && payload.len() >= SESSION_HEADER_LEN) {
+        return Err("Invalid session file format".into());
     }
 
-    #[derive(bincode::Decode)]
-    struct LegacyPersistentSessionData {
-        version: u32,
-        strokes: Vec<Stroke>,
+    let version = u32::from_le_bytes(
+        payload[4..8]
+            .try_into()
+            .map_err(|e| format!("Failed to read session file version: {e}"))?,
+    );
+    let body = &payload[SESSION_HEADER_LEN..];
+    match version {
+        1 => bincode::decode_from_slice(body, bincode::config::standard())
+            .map(|(data, _)| data)
+            .map_err(|e| format!("Failed to decode session data: {e}")),
+        _ => Err(format!("Unsupported session file version: {version}")),
     }
-
-    if let Ok((legacy, _)) = bincode::decode_from_slice::<LegacyPersistentSessionData, _>(
-        payload,
-        bincode::config::standard(),
-    ) {
-        let _ = legacy.version;
-        return Some(PersistentSessionData {
-            strokes: legacy.strokes,
-        });
-    }
-
-    if let Ok((data, _)) =
-        bincode::decode_from_slice::<PersistentSessionData, _>(payload, bincode::config::standard())
-    {
-        return Some(data);
-    }
-
-    if let Ok((strokes, _)) =
-        bincode::decode_from_slice::<Vec<Stroke>, _>(payload, bincode::config::standard())
-    {
-        return Some(PersistentSessionData { strokes });
-    }
-
-    None
 }
 
 #[derive(Clone, Debug)]
@@ -176,7 +150,7 @@ impl S3Storage {
 
 #[async_trait]
 impl Storage for S3Storage {
-    async fn load_session(&self, session_id: &str) -> Option<PersistentSessionData> {
+    async fn load_session(&self, session_id: &str) -> Result<PersistentSessionData, String> {
         let key = self.object_key(session_id);
         let response = self
             .client
@@ -190,18 +164,20 @@ impl Storage for S3Storage {
             Err(error) => {
                 if let Some(service_error) = error.as_service_error() {
                     if service_error.is_no_such_key() {
-                        return None;
+                        return Err(format!("Session {session_id} not found"));
                     }
                 }
-                eprintln!("Failed to load session {session_id} from s3: {error:?}");
-                return None;
+                return Err(format!(
+                    "Failed to load session {session_id} from s3: {error:?}"
+                ));
             }
         };
         let bytes = match output.body.collect().await {
             Ok(collected) => collected.into_bytes(),
             Err(error) => {
-                eprintln!("Failed to read session {session_id} from s3 response: {error:?}");
-                return None;
+                return Err(format!(
+                    "Failed to read session {session_id} from s3 response: {error:?}"
+                ));
             }
         };
         decode_data(&bytes)
