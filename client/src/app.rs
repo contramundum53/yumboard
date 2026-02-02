@@ -461,21 +461,18 @@ fn start_app() -> Result<(), JsValue> {
     }
 
     {
-        let ui = ui.clone();
-        let ui_listener = ui.clone();
+        let ui_callback = ui.clone();
         let oninput = Closure::<dyn FnMut(Event)>::new(move |_| {
-            update_size_label(&ui.size_input, &ui.size_value);
+            update_size_label(&ui_callback.size_input, &ui_callback.size_value);
         });
-        ui_listener
-            .size_input
+        ui.size_input
             .add_event_listener_with_callback("input", oninput.as_ref().unchecked_ref())?;
         oninput.forget();
     }
 
     {
         let tool_state = state.clone();
-        let ui = ui.clone();
-        let ui_listener = ui.clone();
+        let ui_callback = ui.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = tool_state.borrow_mut();
             if matches!(state.mode, Mode::Loading(_)) {
@@ -484,30 +481,28 @@ fn start_app() -> Result<(), JsValue> {
             state.mode = Mode::Erase(EraseMode::Idle);
             sync_tool_ui(
                 &state,
-                &ui.canvas,
-                &ui.pan_button,
-                &ui.eraser_button,
-                &ui.lasso_button,
+                &ui_callback.canvas,
+                &ui_callback.pan_button,
+                &ui_callback.eraser_button,
+                &ui_callback.lasso_button,
                 false,
             );
             render_palette(
-                &ui.document,
-                &ui.palette_el,
+                &ui_callback.document,
+                &ui_callback.palette_el,
                 &state.palette,
                 palette_selected(&state.mode),
             );
-            hide_color_input(&ui.color_input);
+            hide_color_input(&ui_callback.color_input);
         });
-        ui_listener
-            .eraser_button
+        ui.eraser_button
             .add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
     }
 
     {
         let tool_state = state.clone();
-        let ui = ui.clone();
-        let ui_listener = ui.clone();
+        let ui_callback = ui.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = tool_state.borrow_mut();
             if matches!(state.mode, Mode::Loading(_)) {
@@ -519,30 +514,28 @@ fn start_app() -> Result<(), JsValue> {
             });
             sync_tool_ui(
                 &state,
-                &ui.canvas,
-                &ui.pan_button,
-                &ui.eraser_button,
-                &ui.lasso_button,
+                &ui_callback.canvas,
+                &ui_callback.pan_button,
+                &ui_callback.eraser_button,
+                &ui_callback.lasso_button,
                 false,
             );
             render_palette(
-                &ui.document,
-                &ui.palette_el,
+                &ui_callback.document,
+                &ui_callback.palette_el,
                 &state.palette,
                 palette_selected(&state.mode),
             );
-            hide_color_input(&ui.color_input);
+            hide_color_input(&ui_callback.color_input);
         });
-        ui_listener
-            .lasso_button
+        ui.lasso_button
             .add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
     }
 
     {
         let tool_state = state.clone();
-        let ui = ui.clone();
-        let ui_listener = ui.clone();
+        let ui_callback = ui.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = tool_state.borrow_mut();
             if matches!(state.mode, Mode::Loading(_)) {
@@ -551,22 +544,21 @@ fn start_app() -> Result<(), JsValue> {
             state.mode = Mode::Pan(PanMode::Idle);
             sync_tool_ui(
                 &state,
-                &ui.canvas,
-                &ui.pan_button,
-                &ui.eraser_button,
-                &ui.lasso_button,
+                &ui_callback.canvas,
+                &ui_callback.pan_button,
+                &ui_callback.eraser_button,
+                &ui_callback.lasso_button,
                 false,
             );
             render_palette(
-                &ui.document,
-                &ui.palette_el,
+                &ui_callback.document,
+                &ui_callback.palette_el,
                 &state.palette,
                 palette_selected(&state.mode),
             );
-            hide_color_input(&ui.color_input);
+            hide_color_input(&ui_callback.color_input);
         });
-        ui_listener
-            .pan_button
+        ui.pan_button
             .add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
     }
@@ -592,8 +584,7 @@ fn start_app() -> Result<(), JsValue> {
 
     {
         let palette_state = state.clone();
-        let ui = ui.clone();
-        let ui_listener = ui.clone();
+        let ui_callback = ui.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
             let action = match palette_action_from_event(&event) {
                 Some(action) => action,
@@ -605,30 +596,34 @@ fn start_app() -> Result<(), JsValue> {
             }
             match action {
                 PaletteAction::Add => {
-                    let color = ui.color_input.value();
+                    let color = ui_callback.color_input.value();
                     state.palette.push(color.clone());
                     let palette_selected = state.palette.len().saturating_sub(1);
                     state.mode = Mode::Draw(DrawState {
                         mode: DrawMode::Idle,
                         palette_selected,
                     });
-                    ui.color_input.set_value(&color);
+                    ui_callback.color_input.set_value(&color);
                     sync_tool_ui(
                         &state,
-                        &ui.canvas,
-                        &ui.pan_button,
-                        &ui.eraser_button,
-                        &ui.lasso_button,
+                        &ui_callback.canvas,
+                        &ui_callback.pan_button,
+                        &ui_callback.eraser_button,
+                        &ui_callback.lasso_button,
                         false,
                     );
                     render_palette(
-                        &ui.document,
-                        &ui.palette_el,
+                        &ui_callback.document,
+                        &ui_callback.palette_el,
                         &state.palette,
                         Some(palette_selected),
                     );
-                    show_color_input(&ui.palette_el, &ui.color_input, Some(palette_selected));
-                    ui.color_input.click();
+                    show_color_input(
+                        &ui_callback.palette_el,
+                        &ui_callback.color_input,
+                        Some(palette_selected),
+                    );
+                    ui_callback.color_input.click();
                 }
                 PaletteAction::Select(index) => {
                     if index >= state.palette.len() {
@@ -640,36 +635,43 @@ fn start_app() -> Result<(), JsValue> {
                         palette_selected: index,
                     });
                     if let Some(color) = state.palette.get(index).cloned() {
-                        ui.color_input.set_value(&color);
+                        ui_callback.color_input.set_value(&color);
                     }
                     sync_tool_ui(
                         &state,
-                        &ui.canvas,
-                        &ui.pan_button,
-                        &ui.eraser_button,
-                        &ui.lasso_button,
+                        &ui_callback.canvas,
+                        &ui_callback.pan_button,
+                        &ui_callback.eraser_button,
+                        &ui_callback.lasso_button,
                         false,
                     );
-                    render_palette(&ui.document, &ui.palette_el, &state.palette, Some(index));
-                    show_color_input(&ui.palette_el, &ui.color_input, Some(index));
+                    render_palette(
+                        &ui_callback.document,
+                        &ui_callback.palette_el,
+                        &state.palette,
+                        Some(index),
+                    );
+                    show_color_input(
+                        &ui_callback.palette_el,
+                        &ui_callback.color_input,
+                        Some(index),
+                    );
                     if already_selected {
-                        ui.color_input.click();
+                        ui_callback.color_input.click();
                     }
                 }
             }
         });
-        ui_listener
-            .palette_el
+        ui.palette_el
             .add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
     }
 
     {
         let palette_state = state.clone();
-        let ui = ui.clone();
-        let ui_listener = ui.clone();
+        let ui_callback = ui.clone();
         let oninput = Closure::<dyn FnMut(Event)>::new(move |_| {
-            let color = ui.color_input.value();
+            let color = ui_callback.color_input.value();
             let mut state = palette_state.borrow_mut();
             let selected = match &state.mode {
                 Mode::Draw(draw) => draw.palette_selected,
@@ -681,19 +683,18 @@ fn start_app() -> Result<(), JsValue> {
                 return;
             }
             render_palette(
-                &ui.document,
-                &ui.palette_el,
+                &ui_callback.document,
+                &ui_callback.palette_el,
                 &state.palette,
                 palette_selected(&state.mode),
             );
             show_color_input(
-                &ui.palette_el,
-                &ui.color_input,
+                &ui_callback.palette_el,
+                &ui_callback.color_input,
                 palette_selected(&state.mode),
             );
         });
-        ui_listener
-            .color_input
+        ui.color_input
             .add_event_listener_with_callback("input", oninput.as_ref().unchecked_ref())?;
         oninput.forget();
     }
@@ -744,29 +745,30 @@ fn start_app() -> Result<(), JsValue> {
     }
 
     {
-        let ui = ui.clone();
-        let ui_listener = ui.clone();
+        let ui_callback = ui.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
             event.stop_propagation();
-            let is_open = !ui.save_menu.has_attribute("hidden");
+            let is_open = !ui_callback.save_menu.has_attribute("hidden");
             if is_open {
-                let _ = ui.save_menu.set_attribute("hidden", "");
-                let _ = ui.save_button.set_attribute("aria-expanded", "false");
+                let _ = ui_callback.save_menu.set_attribute("hidden", "");
+                let _ = ui_callback
+                    .save_button
+                    .set_attribute("aria-expanded", "false");
             } else {
-                let _ = ui.save_menu.remove_attribute("hidden");
-                let _ = ui.save_button.set_attribute("aria-expanded", "true");
+                let _ = ui_callback.save_menu.remove_attribute("hidden");
+                let _ = ui_callback
+                    .save_button
+                    .set_attribute("aria-expanded", "true");
             }
         });
-        ui_listener
-            .save_button
+        ui.save_button
             .add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
     }
 
     {
         let save_state = state.clone();
-        let ui = ui.clone();
-        let ui_listener = ui.clone();
+        let ui_callback = ui.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let strokes = { save_state.borrow().strokes.clone() };
             let payload = SaveData {
@@ -778,41 +780,41 @@ fn start_app() -> Result<(), JsValue> {
             };
             let encoded = js_sys::encode_uri_component(&json);
             let href = format!("data:application/json;charset=utf-8,{encoded}");
-            if let Ok(element) = ui.document.create_element("a") {
+            if let Ok(element) = ui_callback.document.create_element("a") {
                 if let Ok(anchor) = element.dyn_into::<HtmlAnchorElement>() {
                     anchor.set_href(&href);
                     anchor.set_download("yumboard.json");
                     anchor.click();
                 }
             }
-            let _ = ui.save_menu.set_attribute("hidden", "");
-            let _ = ui.save_button.set_attribute("aria-expanded", "false");
+            let _ = ui_callback.save_menu.set_attribute("hidden", "");
+            let _ = ui_callback
+                .save_button
+                .set_attribute("aria-expanded", "false");
         });
-        ui_listener
-            .save_json_button
+        ui.save_json_button
             .add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
     }
 
     {
         let save_state = state.clone();
-        let ui = ui.clone();
-        let ui_listener = ui.clone();
+        let ui_callback = ui.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let html = build_pdf_html(&save_state.borrow(), false);
-            open_print_window(&ui.document, &html);
-            let _ = ui.save_menu.set_attribute("hidden", "");
-            let _ = ui.save_button.set_attribute("aria-expanded", "false");
+            open_print_window(&ui_callback.document, &html);
+            let _ = ui_callback.save_menu.set_attribute("hidden", "");
+            let _ = ui_callback
+                .save_button
+                .set_attribute("aria-expanded", "false");
         });
-        ui_listener
-            .save_pdf_button
+        ui.save_pdf_button
             .add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
     }
 
     {
-        let ui = ui.clone();
-        let ui_listener = ui.clone();
+        let ui_callback = ui.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
             let target: web_sys::EventTarget = match event.target() {
                 Some(target) => target,
@@ -821,40 +823,38 @@ fn start_app() -> Result<(), JsValue> {
             let Some(target) = target.dyn_into::<web_sys::Node>().ok() else {
                 return;
             };
-            let menu_node: web_sys::Node = ui.save_menu.clone().into();
-            let button_node: web_sys::Node = ui.save_button.clone().into();
+            let menu_node: web_sys::Node = ui_callback.save_menu.clone().into();
+            let button_node: web_sys::Node = ui_callback.save_button.clone().into();
             if menu_node.contains(Some(&target)) || button_node.contains(Some(&target)) {
                 return;
             }
-            let _ = ui.save_menu.set_attribute("hidden", "");
-            let _ = ui.save_button.set_attribute("aria-expanded", "false");
+            let _ = ui_callback.save_menu.set_attribute("hidden", "");
+            let _ = ui_callback
+                .save_button
+                .set_attribute("aria-expanded", "false");
         });
-        ui_listener
-            .document
+        ui.document
             .add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
     }
 
     {
-        let ui = ui.clone();
-        let ui_listener = ui.clone();
+        let ui_callback = ui.clone();
         let load_state = state.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             if matches!(load_state.borrow().mode, Mode::Loading(_)) {
                 return;
             }
-            ui.load_file.set_value("");
-            ui.load_file.click();
+            ui_callback.load_file.set_value("");
+            ui_callback.load_file.click();
         });
-        ui_listener
-            .load_button
+        ui.load_button
             .add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
     }
 
     {
-        let ui = ui.clone();
-        let ui_listener = ui.clone();
+        let ui_callback = ui.clone();
         let load_state_onchange = state.clone();
         let load_sender_onchange = ws_sender.clone();
         let load_ctx = ctx.clone();
@@ -862,7 +862,7 @@ fn start_app() -> Result<(), JsValue> {
             if !load_sender_onchange.is_open() {
                 return;
             }
-            let files = ui.load_file.files();
+            let files = ui_callback.load_file.files();
             let file = files.and_then(|list| list.get(0));
             let Some(file) = file else {
                 return;
@@ -880,7 +880,7 @@ fn start_app() -> Result<(), JsValue> {
             let load_state_onload = load_state_onchange.clone();
             let load_sender_onload = load_sender_onchange.clone();
             let load_ctx = load_ctx.clone();
-            let ui_onload = ui.clone();
+            let ui_onload = ui_callback.clone();
             let onload = Closure::<dyn FnMut(ProgressEvent)>::new(move |event: ProgressEvent| {
                 if !load_sender_onload.is_open() {
                     set_load_busy(&ui_onload.load_button, false);
@@ -913,15 +913,14 @@ fn start_app() -> Result<(), JsValue> {
                     onload: Some(onload),
                 });
             }
-            set_load_busy(&ui.load_button, true);
+            set_load_busy(&ui_callback.load_button, true);
             let _ = reader.read_as_text(&file);
             let mut state = load_state_onchange.borrow_mut();
             if let Mode::Loading(loading) = &mut state.mode {
                 loading.reader = Some(reader);
             }
         });
-        ui_listener
-            .load_file
+        ui.load_file
             .add_event_listener_with_callback("change", onchange.as_ref().unchecked_ref())?;
         onchange.forget();
     }
@@ -929,8 +928,7 @@ fn start_app() -> Result<(), JsValue> {
     {
         let down_state = state.clone();
         let down_sender = ws_sender.clone();
-        let ui = ui.clone();
-        let ui_listener = ui.clone();
+        let ui_callback = ui.clone();
         let down_ctx = ctx.clone();
         let ondown = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             if event.button() != 0 {
@@ -971,7 +969,7 @@ fn start_app() -> Result<(), JsValue> {
                             state.active_draw_timestamp = 0.0;
                         }
                     }
-                    let _ = ui.canvas.set_pointer_capture(event.pointer_id());
+                    let _ = ui_callback.canvas.set_pointer_capture(event.pointer_id());
                     return;
                 }
                 if state.touch_points.len() == 1 {
@@ -981,12 +979,12 @@ fn start_app() -> Result<(), JsValue> {
                         origin_x: state.pan_x,
                         origin_y: state.pan_y,
                     });
-                    set_canvas_mode(&ui.canvas, &state.mode, true);
-                    let _ = ui.canvas.set_pointer_capture(event.pointer_id());
+                    set_canvas_mode(&ui_callback.canvas, &state.mode, true);
+                    let _ = ui_callback.canvas.set_pointer_capture(event.pointer_id());
                     return;
                 }
             }
-            let rect = ui.canvas.get_bounding_client_rect();
+            let rect = ui_callback.canvas.get_bounding_client_rect();
             let screen_x = event.client_x() as f64 - rect.left();
             let screen_y = event.client_y() as f64 - rect.top();
             let (pan_x, pan_y, zoom, select_info) = {
@@ -1024,13 +1022,14 @@ fn start_app() -> Result<(), JsValue> {
                         state.mode = Mode::Select(select);
                         return;
                     }
-                    let world_point = match event_to_point(&ui.canvas, &event, pan_x, pan_y, zoom) {
-                        Some(point) => point,
-                        None => {
-                            state.mode = Mode::Select(select);
-                            return;
-                        }
-                    };
+                    let world_point =
+                        match event_to_point(&ui_callback.canvas, &event, pan_x, pan_y, zoom) {
+                            Some(point) => point,
+                            None => {
+                                state.mode = Mode::Select(select);
+                                return;
+                            }
+                        };
                     let Some((hit, selection_ids, snapshot, center)) = select_info else {
                         state.mode = Mode::Select(select);
                         return;
@@ -1047,7 +1046,7 @@ fn start_app() -> Result<(), JsValue> {
                                 state.mode = Mode::Select(select);
                                 redraw(&down_ctx, &mut state);
                                 down_sender.send(&ClientMessage::Remove { ids });
-                                let _ = ui.canvas.set_pointer_capture(event.pointer_id());
+                                let _ = ui_callback.canvas.set_pointer_capture(event.pointer_id());
                                 return;
                             }
                             SelectionHit::Rotate => {
@@ -1096,7 +1095,7 @@ fn start_app() -> Result<(), JsValue> {
                             }
                         }
                         state.mode = Mode::Select(select);
-                        let _ = ui.canvas.set_pointer_capture(event.pointer_id());
+                        let _ = ui_callback.canvas.set_pointer_capture(event.pointer_id());
                         return;
                     }
                     select.selected_ids.clear();
@@ -1105,7 +1104,7 @@ fn start_app() -> Result<(), JsValue> {
                     };
                     state.mode = Mode::Select(select);
                     redraw(&down_ctx, &mut state);
-                    let _ = ui.canvas.set_pointer_capture(event.pointer_id());
+                    let _ = ui_callback.canvas.set_pointer_capture(event.pointer_id());
                 }
                 Mode::Pan(_) => {
                     state.mode = Mode::Pan(PanMode::Active {
@@ -1114,21 +1113,22 @@ fn start_app() -> Result<(), JsValue> {
                         origin_x: pan_x,
                         origin_y: pan_y,
                     });
-                    set_canvas_mode(&ui.canvas, &state.mode, true);
-                    let _ = ui.canvas.set_pointer_capture(event.pointer_id());
+                    set_canvas_mode(&ui_callback.canvas, &state.mode, true);
+                    let _ = ui_callback.canvas.set_pointer_capture(event.pointer_id());
                 }
                 Mode::Erase(_) => {
                     if !down_sender.is_open() {
                         state.mode = Mode::Erase(EraseMode::Idle);
                         return;
                     }
-                    let point = match event_to_point(&ui.canvas, &event, pan_x, pan_y, zoom) {
-                        Some(point) => point,
-                        None => {
-                            state.mode = Mode::Erase(EraseMode::Idle);
-                            return;
-                        }
-                    };
+                    let point =
+                        match event_to_point(&ui_callback.canvas, &event, pan_x, pan_y, zoom) {
+                            Some(point) => point,
+                            None => {
+                                state.mode = Mode::Erase(EraseMode::Idle);
+                                return;
+                            }
+                        };
                     state.mode = Mode::Erase(EraseMode::Active {
                         hits: HashSet::new(),
                     });
@@ -1136,23 +1136,24 @@ fn start_app() -> Result<(), JsValue> {
                     for id in removed_ids {
                         down_sender.send(&ClientMessage::Erase { id });
                     }
-                    let _ = ui.canvas.set_pointer_capture(event.pointer_id());
+                    let _ = ui_callback.canvas.set_pointer_capture(event.pointer_id());
                 }
                 Mode::Draw(mut draw) => {
                     if !down_sender.is_open() {
                         state.mode = Mode::Draw(draw);
                         return;
                     }
-                    let point = match event_to_point(&ui.canvas, &event, pan_x, pan_y, zoom) {
-                        Some(point) => point,
-                        None => {
-                            state.mode = Mode::Draw(draw);
-                            return;
-                        }
-                    };
+                    let point =
+                        match event_to_point(&ui_callback.canvas, &event, pan_x, pan_y, zoom) {
+                            Some(point) => point,
+                            None => {
+                                state.mode = Mode::Draw(draw);
+                                return;
+                            }
+                        };
                     let id = make_id();
-                    let color = parse_color(&ui.color_input.value());
-                    let size = sanitize_size(ui.size_input.value_as_number() as f32);
+                    let color = parse_color(&ui_callback.color_input.value());
+                    let size = sanitize_size(ui_callback.size_input.value_as_number() as f32);
 
                     state.active_draw_pointer = Some(event.pointer_id());
                     state.active_draw_timestamp = event.time_stamp();
@@ -1174,12 +1175,11 @@ fn start_app() -> Result<(), JsValue> {
                         size,
                         point,
                     });
-                    let _ = ui.canvas.set_pointer_capture(event.pointer_id());
+                    let _ = ui_callback.canvas.set_pointer_capture(event.pointer_id());
                 }
             }
         });
-        ui_listener
-            .canvas
+        ui.canvas
             .add_event_listener_with_callback("pointerdown", ondown.as_ref().unchecked_ref())?;
         ondown.forget();
     }
@@ -1187,8 +1187,7 @@ fn start_app() -> Result<(), JsValue> {
     {
         let move_state = state.clone();
         let move_sender = ws_sender.clone();
-        let ui = ui.clone();
-        let ui_listener = ui.clone();
+        let ui_callback = ui.clone();
         let move_window = window.clone();
         let move_ctx = ctx.clone();
         let onmove = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
@@ -1245,7 +1244,7 @@ fn start_app() -> Result<(), JsValue> {
                     let state = move_state.borrow();
                     (state.pan_x, state.pan_y, state.zoom)
                 };
-                let rect = ui.canvas.get_bounding_client_rect();
+                let rect = ui_callback.canvas.get_bounding_client_rect();
                 let screen_x = event.client_x() as f64 - rect.left();
                 let screen_y = event.client_y() as f64 - rect.top();
                 let hit = {
@@ -1270,7 +1269,7 @@ fn start_app() -> Result<(), JsValue> {
                             continue;
                         }
                         let world_point =
-                            match event_to_point(&ui.canvas, &event, pan_x, pan_y, zoom) {
+                            match event_to_point(&ui_callback.canvas, &event, pan_x, pan_y, zoom) {
                                 Some(point) => point,
                                 None => continue,
                             };
@@ -1402,7 +1401,7 @@ fn start_app() -> Result<(), JsValue> {
                             }
                             SelectMode::Idle => {
                                 if hit.is_some() {
-                                    set_canvas_mode(&ui.canvas, &state.mode, false);
+                                    set_canvas_mode(&ui_callback.canvas, &state.mode, false);
                                 }
                             }
                         }
@@ -1417,10 +1416,11 @@ fn start_app() -> Result<(), JsValue> {
                         if !move_sender.is_open() {
                             continue;
                         }
-                        let point = match event_to_point(&ui.canvas, &event, pan_x, pan_y, zoom) {
-                            Some(point) => point,
-                            None => continue,
-                        };
+                        let point =
+                            match event_to_point(&ui_callback.canvas, &event, pan_x, pan_y, zoom) {
+                                Some(point) => point,
+                                None => continue,
+                            };
                         let removed_ids = erase_hits_at_point(&mut state, &move_ctx, point);
                         for id in removed_ids {
                             move_sender.send(&ClientMessage::Erase { id });
@@ -1454,10 +1454,11 @@ fn start_app() -> Result<(), JsValue> {
                             continue;
                         }
                         state.active_draw_timestamp = timestamp;
-                        let point = match event_to_point(&ui.canvas, &event, pan_x, pan_y, zoom) {
-                            Some(point) => point,
-                            None => continue,
-                        };
+                        let point =
+                            match event_to_point(&ui_callback.canvas, &event, pan_x, pan_y, zoom) {
+                                Some(point) => point,
+                                None => continue,
+                            };
                         if move_stroke(&mut state, &move_ctx, &id, point) {
                             state.pending_points.entry(id).or_default().push(point);
                             let should_schedule = if state.flush_scheduled {
@@ -1476,10 +1477,9 @@ fn start_app() -> Result<(), JsValue> {
                 }
             }
         });
-        ui_listener
-            .canvas
+        ui.canvas
             .add_event_listener_with_callback("pointermove", onmove.as_ref().unchecked_ref())?;
-        ui_listener.canvas.add_event_listener_with_callback(
+        ui.canvas.add_event_listener_with_callback(
             "pointerrawupdate",
             onmove.as_ref().unchecked_ref(),
         )?;
@@ -1489,8 +1489,7 @@ fn start_app() -> Result<(), JsValue> {
     {
         let stop_state = state.clone();
         let stop_sender = ws_sender.clone();
-        let ui = ui.clone();
-        let ui_listener = ui.clone();
+        let ui_callback = ui.clone();
         let stop_ctx = ctx.clone();
         let onstop = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             let mut state = stop_state.borrow_mut();
@@ -1503,8 +1502,10 @@ fn start_app() -> Result<(), JsValue> {
                     state.touch_pan = None;
                 }
                 event.prevent_default();
-                if ui.canvas.has_pointer_capture(event.pointer_id()) {
-                    let _ = ui.canvas.release_pointer_capture(event.pointer_id());
+                if ui_callback.canvas.has_pointer_capture(event.pointer_id()) {
+                    let _ = ui_callback
+                        .canvas
+                        .release_pointer_capture(event.pointer_id());
                 }
                 return;
             }
@@ -1522,8 +1523,10 @@ fn start_app() -> Result<(), JsValue> {
                 return;
             }
             event.prevent_default();
-            if ui.canvas.has_pointer_capture(event.pointer_id()) {
-                let _ = ui.canvas.release_pointer_capture(event.pointer_id());
+            if ui_callback.canvas.has_pointer_capture(event.pointer_id()) {
+                let _ = ui_callback
+                    .canvas
+                    .release_pointer_capture(event.pointer_id());
             }
             let mode = std::mem::replace(&mut state.mode, Mode::Pan(PanMode::Idle));
             match mode {
@@ -1560,7 +1563,7 @@ fn start_app() -> Result<(), JsValue> {
                 }
                 Mode::Pan(PanMode::Active { .. }) => {
                     state.mode = Mode::Pan(PanMode::Idle);
-                    set_canvas_mode(&ui.canvas, &state.mode, false);
+                    set_canvas_mode(&ui_callback.canvas, &state.mode, false);
                 }
                 Mode::Draw(mut draw) => {
                     if state.active_draw_pointer != Some(event.pointer_id()) {
@@ -1600,16 +1603,13 @@ fn start_app() -> Result<(), JsValue> {
                 }
             }
         });
-        ui_listener
-            .canvas
+        ui.canvas
             .add_event_listener_with_callback("pointerup", onstop.as_ref().unchecked_ref())?;
-        ui_listener
-            .canvas
+        ui.canvas
             .add_event_listener_with_callback("pointercancel", onstop.as_ref().unchecked_ref())?;
-        ui_listener
-            .canvas
+        ui.canvas
             .add_event_listener_with_callback("pointerleave", onstop.as_ref().unchecked_ref())?;
-        ui_listener.canvas.add_event_listener_with_callback(
+        ui.canvas.add_event_listener_with_callback(
             "lostpointercapture",
             onstop.as_ref().unchecked_ref(),
         )?;
@@ -1618,8 +1618,7 @@ fn start_app() -> Result<(), JsValue> {
 
     {
         let zoom_state = state.clone();
-        let ui = ui.clone();
-        let ui_listener = ui.clone();
+        let ui_callback = ui.clone();
         let zoom_ctx = ctx.clone();
         let onwheel = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
             let wheel_event = match event.dyn_into::<web_sys::WheelEvent>() {
@@ -1627,7 +1626,7 @@ fn start_app() -> Result<(), JsValue> {
                 Err(_) => return,
             };
             wheel_event.prevent_default();
-            let rect = ui.canvas.get_bounding_client_rect();
+            let rect = ui_callback.canvas.get_bounding_client_rect();
             let (zoom, pan_x, pan_y) = {
                 let state = zoom_state.borrow();
                 (state.zoom, state.pan_x, state.pan_y)
@@ -1650,8 +1649,7 @@ fn start_app() -> Result<(), JsValue> {
                 redraw(&zoom_ctx, &mut state);
             }
         });
-        ui_listener
-            .canvas
+        ui.canvas
             .add_event_listener_with_callback("wheel", onwheel.as_ref().unchecked_ref())?;
         onwheel.forget();
     }
