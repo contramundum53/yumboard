@@ -37,6 +37,34 @@ use crate::state::{
 use crate::util::make_id;
 use crate::ws::{connect_ws, WsEvent};
 
+fn schedule_flush(
+    window: &web_sys::Window,
+    ws_sender: &Rc<crate::ws::WsSender>,
+    state: &Rc<RefCell<State>>,
+) {
+    let state = state.clone();
+    let sender = ws_sender.clone();
+    let cb = Closure::once_into_js(move |_: f64| {
+        let pending = {
+            let mut state = state.borrow_mut();
+            state.flush_scheduled = false;
+            std::mem::take(&mut state.pending_points)
+        };
+        for (id, mut points) in pending {
+            const MAX_POINTS_PER_MESSAGE: usize = 128;
+            while !points.is_empty() {
+                let chunk_size = points.len().min(MAX_POINTS_PER_MESSAGE);
+                let chunk = points.drain(..chunk_size).collect::<Vec<_>>();
+                sender.send(&ClientMessage::StrokePoints {
+                    id: id.clone(),
+                    points: chunk,
+                });
+            }
+        }
+    });
+    let _ = window.request_animation_frame(cb.unchecked_ref());
+}
+
 fn palette_selected(mode: &Mode) -> Option<usize> {
     match mode {
         Mode::Draw(draw) => Some(draw.palette_selected),
@@ -321,34 +349,12 @@ fn start_app() -> Result<(), JsValue> {
         }
     })?;
 
-    let schedule_flush: Rc<dyn Fn()> = Rc::new({
-        let state = state.clone();
-        let sender = ws_sender.clone();
+    let schedule_flush = {
         let window = window.clone();
-        move || {
-            let state = state.clone();
-            let sender = sender.clone();
-            let cb = Closure::once_into_js(move |_: f64| {
-                let pending = {
-                    let mut state = state.borrow_mut();
-                    state.flush_scheduled = false;
-                    std::mem::take(&mut state.pending_points)
-                };
-                for (id, mut points) in pending {
-                    const MAX_POINTS_PER_MESSAGE: usize = 128;
-                    while !points.is_empty() {
-                        let chunk_size = points.len().min(MAX_POINTS_PER_MESSAGE);
-                        let chunk = points.drain(..chunk_size).collect::<Vec<_>>();
-                        sender.send(&ClientMessage::StrokePoints {
-                            id: id.clone(),
-                            points: chunk,
-                        });
-                    }
-                }
-            });
-            let _ = window.request_animation_frame(cb.unchecked_ref());
-        }
-    });
+        let sender = ws_sender.clone();
+        let state = state.clone();
+        move || schedule_flush(&window, &sender, &state)
+    };
 
     {
         let resize_state = state.clone();
