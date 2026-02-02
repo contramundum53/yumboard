@@ -54,7 +54,12 @@ pub fn set_status(status_el: &Element, status_text: &Element, state: &str, text:
     status_text.set_text_content(Some(text));
 }
 
-pub fn resize_canvas(window: &Window, state: &mut State) {
+pub fn resize_canvas(
+    window: &Window,
+    canvas: &HtmlCanvasElement,
+    ctx: &web_sys::CanvasRenderingContext2d,
+    state: &mut State,
+) {
     let last_board_width = state.board_width;
     let last_board_height = state.board_height;
     web_sys::console::log_1(
@@ -65,11 +70,11 @@ pub fn resize_canvas(window: &Window, state: &mut State) {
         .into(),
     );
 
-    let rect = state.canvas.get_bounding_client_rect();
+    let rect = canvas.get_bounding_client_rect();
     let dpr = window.device_pixel_ratio();
-    state.canvas.set_width((rect.width() * dpr) as u32);
-    state.canvas.set_height((rect.height() * dpr) as u32);
-    let _ = state.ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
+    canvas.set_width((rect.width() * dpr) as u32);
+    canvas.set_height((rect.height() * dpr) as u32);
+    let _ = ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
     state.board_width = rect.width();
     state.board_height = rect.height();
 
@@ -84,7 +89,7 @@ pub fn resize_canvas(window: &Window, state: &mut State) {
         state.pan_x += (state.board_width - last_board_width) / 2.0;
         state.pan_y += (state.board_height - last_board_height) / 2.0;
     }
-    redraw(state);
+    redraw(ctx, state);
 }
 
 pub fn event_to_point(

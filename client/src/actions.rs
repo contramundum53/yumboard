@@ -15,7 +15,14 @@ pub fn sanitize_size(size: f32) -> f32 {
     size.max(1.0).min(60.0)
 }
 
-pub fn start_stroke(state: &mut State, id: StrokeId, color: Color, size: f32, point: Point) {
+pub fn start_stroke(
+    state: &mut State,
+    ctx: &web_sys::CanvasRenderingContext2d,
+    id: StrokeId,
+    color: Color,
+    size: f32,
+    point: Point,
+) {
     let point = match normalize_point(point) {
         Some(point) => point,
         None => return,
@@ -30,7 +37,7 @@ pub fn start_stroke(state: &mut State, id: StrokeId, color: Color, size: f32, po
     state.strokes.push(stroke);
     state.active_ids.insert(id);
     draw_dot(
-        &state.ctx,
+        ctx,
         state.zoom,
         state.pan_x,
         state.pan_y,
@@ -40,7 +47,12 @@ pub fn start_stroke(state: &mut State, id: StrokeId, color: Color, size: f32, po
     );
 }
 
-pub fn move_stroke(state: &mut State, id: &StrokeId, point: Point) -> bool {
+pub fn move_stroke(
+    state: &mut State,
+    ctx: &web_sys::CanvasRenderingContext2d,
+    id: &StrokeId,
+    point: Point,
+) -> bool {
     let point = match normalize_point(point) {
         Some(point) => point,
         None => return false,
@@ -68,18 +80,10 @@ pub fn move_stroke(state: &mut State, id: &StrokeId, point: Point) -> bool {
     }
     if let Some((from, to, color, size)) = draw_action {
         if from == to {
-            draw_dot(
-                &state.ctx,
-                state.zoom,
-                state.pan_x,
-                state.pan_y,
-                to,
-                color,
-                size,
-            );
+            draw_dot(ctx, state.zoom, state.pan_x, state.pan_y, to, color, size);
         } else {
             draw_segment(
-                &state.ctx,
+                ctx,
                 state.zoom,
                 state.pan_x,
                 state.pan_y,
@@ -98,14 +102,14 @@ pub fn end_stroke(state: &mut State, id: &StrokeId) {
     state.active_ids.remove(id);
 }
 
-pub fn clear_board(state: &mut State) {
+pub fn clear_board(state: &mut State, ctx: &web_sys::CanvasRenderingContext2d) {
     state.strokes.clear();
     state.active_ids.clear();
     if let Mode::Select(select) = &mut state.mode {
         select.selected_ids.clear();
         select.mode = SelectMode::Idle;
     }
-    redraw(state);
+    redraw(ctx, state);
 }
 
 pub fn remove_stroke(state: &mut State, id: &StrokeId) {
@@ -121,17 +125,25 @@ pub fn replace_stroke_local(state: &mut State, stroke: Stroke) {
     }
 }
 
-pub fn restore_stroke(state: &mut State, mut stroke: Stroke) {
+pub fn restore_stroke(
+    state: &mut State,
+    ctx: &web_sys::CanvasRenderingContext2d,
+    mut stroke: Stroke,
+) {
     stroke.points = stroke
         .points
         .into_iter()
         .filter_map(normalize_point)
         .collect();
     state.strokes.push(stroke);
-    redraw(state);
+    redraw(ctx, state);
 }
 
-pub fn erase_hits_at_point(state: &mut State, point: Point) -> Vec<StrokeId> {
+pub fn erase_hits_at_point(
+    state: &mut State,
+    ctx: &web_sys::CanvasRenderingContext2d,
+    point: Point,
+) -> Vec<StrokeId> {
     let hits = match &mut state.mode {
         Mode::Erase(EraseMode::Active { hits }) => hits,
         _ => return Vec::new(),
@@ -157,13 +169,17 @@ pub fn erase_hits_at_point(state: &mut State, point: Point) -> Vec<StrokeId> {
     }
 
     if !removed.is_empty() {
-        redraw(state);
+        redraw(ctx, state);
     }
 
     removed
 }
 
-pub fn adopt_strokes(state: &mut State, strokes: Vec<Stroke>) {
+pub fn adopt_strokes(
+    state: &mut State,
+    ctx: &web_sys::CanvasRenderingContext2d,
+    strokes: Vec<Stroke>,
+) {
     let mut sanitized = Vec::with_capacity(strokes.len());
     for mut stroke in strokes {
         stroke.points = stroke
@@ -184,17 +200,26 @@ pub fn adopt_strokes(state: &mut State, strokes: Vec<Stroke>) {
     state.zoom = zoom;
     state.pan_x = pan_x;
     state.pan_y = pan_y;
-    redraw(state);
+    redraw(ctx, state);
 }
 
-pub fn apply_transformed_strokes(state: &mut State, strokes: &[Stroke]) {
+pub fn apply_transformed_strokes(
+    state: &mut State,
+    ctx: &web_sys::CanvasRenderingContext2d,
+    strokes: &[Stroke],
+) {
     for stroke in strokes {
         replace_stroke_local(state, stroke.clone());
     }
-    redraw(state);
+    redraw(ctx, state);
 }
 
-pub fn apply_transform_operation(state: &mut State, ids: &[StrokeId], op: &TransformOp) {
+pub fn apply_transform_operation(
+    state: &mut State,
+    ctx: &web_sys::CanvasRenderingContext2d,
+    ids: &[StrokeId],
+    op: &TransformOp,
+) {
     if ids.is_empty() {
         return;
     }
@@ -253,6 +278,7 @@ pub fn apply_transform_operation(state: &mut State, ids: &[StrokeId], op: &Trans
             }
         }
     }
+    redraw(ctx, state);
 }
 
 pub fn finalize_lasso_selection(state: &mut State) {

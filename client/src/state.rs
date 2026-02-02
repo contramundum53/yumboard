@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use wasm_bindgen::prelude::Closure;
-use web_sys::{CanvasRenderingContext2d, FileReader, HtmlCanvasElement, ProgressEvent};
+use web_sys::{FileReader, ProgressEvent};
 
 use yumboard_shared::{Point, Stroke, StrokeId};
 
@@ -107,8 +107,6 @@ pub enum Mode {
 }
 
 pub struct State {
-    pub canvas: HtmlCanvasElement,
-    pub ctx: CanvasRenderingContext2d,
     pub strokes: Vec<Stroke>,
     pub active_ids: HashSet<StrokeId>,
     pub board_width: f64,

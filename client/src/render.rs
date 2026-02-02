@@ -50,13 +50,13 @@ pub fn draw_segment(
     ctx.stroke();
 }
 
-pub fn draw_stroke(state: &State, stroke: &Stroke) {
+pub fn draw_stroke(ctx: &CanvasRenderingContext2d, state: &State, stroke: &Stroke) {
     if stroke.points.is_empty() {
         return;
     }
     if stroke.points.len() == 1 {
         draw_dot(
-            &state.ctx,
+            ctx,
             state.zoom,
             state.pan_x,
             state.pan_y,
@@ -68,7 +68,7 @@ pub fn draw_stroke(state: &State, stroke: &Stroke) {
     }
     for i in 1..stroke.points.len() {
         draw_segment(
-            &state.ctx,
+            ctx,
             state.zoom,
             state.pan_x,
             state.pan_y,
@@ -80,24 +80,21 @@ pub fn draw_stroke(state: &State, stroke: &Stroke) {
     }
 }
 
-pub fn redraw(state: &mut State) {
-    state
-        .ctx
-        .clear_rect(0.0, 0.0, state.board_width, state.board_height);
+pub fn redraw(ctx: &CanvasRenderingContext2d, state: &mut State) {
+    ctx.clear_rect(0.0, 0.0, state.board_width, state.board_height);
     for stroke in &state.strokes {
-        draw_stroke(state, stroke);
+        draw_stroke(ctx, state, stroke);
     }
     if let Mode::Select(select) = &state.mode {
-        draw_selection_overlay(state, select);
+        draw_selection_overlay(ctx, state, select);
     }
 }
 
-pub fn draw_selection_overlay(state: &State, select: &SelectState) {
+pub fn draw_selection_overlay(ctx: &CanvasRenderingContext2d, state: &State, select: &SelectState) {
     let has_lasso = matches!(&select.mode, SelectMode::Lasso { points } if !points.is_empty());
     if select.selected_ids.is_empty() && !has_lasso {
         return;
     }
-    let ctx = &state.ctx;
     ctx.save();
     ctx.set_line_width(1.5);
     ctx.set_stroke_style_str("rgba(26, 31, 42, 0.65)");
