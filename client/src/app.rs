@@ -327,13 +327,6 @@ fn start_app() -> Result<(), JsValue> {
         let sender = ws_sender.clone();
         let window = window.clone();
         move || {
-            {
-                let mut state = state.borrow_mut();
-                if state.flush_scheduled {
-                    return;
-                }
-                state.flush_scheduled = true;
-            }
             let state = state.clone();
             let sender = sender.clone();
             let cb = Closure::once_into_js(move |_: f64| {
@@ -1409,7 +1402,16 @@ fn start_app() -> Result<(), JsValue> {
                         };
                         if move_stroke(&mut state, &id, point) {
                             state.pending_points.entry(id).or_default().push(point);
-                            move_schedule_flush();
+                            let should_schedule = if state.flush_scheduled {
+                                false
+                            } else {
+                                state.flush_scheduled = true;
+                                true
+                            };
+                            if should_schedule {
+                                drop(state);
+                                move_schedule_flush();
+                            }
                         }
                     }
                     _ => {}
