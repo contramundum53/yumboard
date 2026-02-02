@@ -156,7 +156,6 @@ fn start_app() -> Result<(), JsValue> {
     let ws_sender = connect_ws(&window, {
         let ui = ui.clone();
         let message_state = state.clone();
-        let ctx = ui.ctx.clone();
         move |event: WsEvent| match event {
             WsEvent::Open => {
                 ui.set_status("open", "Live connection");
@@ -171,7 +170,7 @@ fn start_app() -> Result<(), JsValue> {
                 let mut state = message_state.borrow_mut();
                 match message {
                     ServerMessage::Sync { strokes } => {
-                        adopt_strokes(&mut state, &ctx, strokes);
+                        adopt_strokes(&mut state, &ui.ctx, strokes);
                     }
                     ServerMessage::StrokeStart {
                         id,
@@ -179,35 +178,35 @@ fn start_app() -> Result<(), JsValue> {
                         size,
                         point,
                     } => {
-                        start_stroke(&mut state, &ctx, id, color, size, point);
+                        start_stroke(&mut state, &ui.ctx, id, color, size, point);
                     }
                     ServerMessage::StrokeMove { id, point } => {
-                        let _ = move_stroke(&mut state, &ctx, &id, point);
+                        let _ = move_stroke(&mut state, &ui.ctx, &id, point);
                     }
                     ServerMessage::StrokePoints { id, points } => {
                         for point in points {
-                            let _ = move_stroke(&mut state, &ctx, &id, point);
+                            let _ = move_stroke(&mut state, &ui.ctx, &id, point);
                         }
                     }
                     ServerMessage::StrokeEnd { id } => {
                         end_stroke(&mut state, &id);
                     }
                     ServerMessage::Clear => {
-                        clear_board(&mut state, &ctx);
+                        clear_board(&mut state, &ui.ctx);
                     }
                     ServerMessage::StrokeRemove { id } => {
                         remove_stroke(&mut state, &id);
-                        redraw(&ctx, &mut state);
+                        redraw(&ui.ctx, &mut state);
                     }
                     ServerMessage::StrokeRestore { stroke } => {
-                        restore_stroke(&mut state, &ctx, stroke);
+                        restore_stroke(&mut state, &ui.ctx, stroke);
                     }
                     ServerMessage::StrokeReplace { stroke } => {
                         replace_stroke_local(&mut state, stroke);
-                        redraw(&ctx, &mut state);
+                        redraw(&ui.ctx, &mut state);
                     }
                     ServerMessage::TransformUpdate { ids, op } => {
-                        apply_transform_operation(&mut state, &ctx, &ids, &op);
+                        apply_transform_operation(&mut state, &ui.ctx, &ids, &op);
                     }
                 }
             }
@@ -218,10 +217,9 @@ fn start_app() -> Result<(), JsValue> {
         let resize_state = state.clone();
         let window_cb = window.clone();
         let ui = ui.clone();
-        let ctx_cb = ui.ctx.clone();
         let onresize = Closure::<dyn FnMut()>::new(move || {
             let mut state = resize_state.borrow_mut();
-            resize_canvas(&window_cb, &ui.canvas, &ctx_cb, &mut state);
+            resize_canvas(&window_cb, &ui.canvas, &ui.ctx, &mut state);
         });
         window.add_event_listener_with_callback("resize", onresize.as_ref().unchecked_ref())?;
         onresize.forget();
@@ -230,7 +228,7 @@ fn start_app() -> Result<(), JsValue> {
     {
         let key_sender = ws_sender.clone();
         let key_state = state.clone();
-        let key_ctx = ui.ctx.clone();
+        let ui_callback = ui.clone();
         let onkeydown = Closure::<dyn FnMut(KeyboardEvent)>::new(move |event: KeyboardEvent| {
             if !key_sender.is_open() {
                 return;
@@ -255,7 +253,7 @@ fn start_app() -> Result<(), JsValue> {
                             select.selected_ids.clear();
                             select.mode = SelectMode::Idle;
                         }
-                        redraw(&key_ctx, &mut state);
+                        redraw(&ui_callback.ctx, &mut state);
                         ids
                     };
                     key_sender.send(&ClientMessage::Remove { ids });
@@ -371,7 +369,7 @@ fn start_app() -> Result<(), JsValue> {
 
     {
         let home_state = state.clone();
-        let home_ctx = ui.ctx.clone();
+        let ui_callback = ui.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = home_state.borrow_mut();
             if matches!(state.mode, Mode::Loading(_)) {
@@ -381,7 +379,7 @@ fn start_app() -> Result<(), JsValue> {
             state.zoom = zoom;
             state.pan_x = pan_x;
             state.pan_y = pan_y;
-            redraw(&home_ctx, &mut state);
+            redraw(&ui_callback.ctx, &mut state);
         });
         ui.home_button
             .add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
@@ -482,14 +480,14 @@ fn start_app() -> Result<(), JsValue> {
     {
         let clear_state = state.clone();
         let clear_sender = ws_sender.clone();
-        let clear_ctx = ui.ctx.clone();
+        let ui_callback = ui.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             if !clear_sender.is_open() {
                 return;
             }
             {
                 let mut state = clear_state.borrow_mut();
-                clear_board(&mut state, &clear_ctx);
+                clear_board(&mut state, &ui_callback.ctx);
             }
             clear_sender.send(&ClientMessage::Clear);
         });
@@ -637,7 +635,6 @@ fn start_app() -> Result<(), JsValue> {
         let ui_callback = ui.clone();
         let load_state_onchange = state.clone();
         let load_sender_onchange = ws_sender.clone();
-        let load_ctx = ui.ctx.clone();
         let onchange = Closure::<dyn FnMut(Event)>::new(move |_| {
             if !load_sender_onchange.is_open() {
                 return;
@@ -659,7 +656,6 @@ fn start_app() -> Result<(), JsValue> {
             };
             let load_state_onload = load_state_onchange.clone();
             let load_sender_onload = load_sender_onchange.clone();
-            let load_ctx = load_ctx.clone();
             let ui_onload = ui_callback.clone();
             let onload = Closure::<dyn FnMut(ProgressEvent)>::new(move |event: ProgressEvent| {
                 if !load_sender_onload.is_open() {
@@ -675,7 +671,7 @@ fn start_app() -> Result<(), JsValue> {
                     };
                     state.mode = previous;
                     if let Some(strokes) = strokes.as_ref() {
-                        adopt_strokes(&mut state, &load_ctx, strokes.clone());
+                        adopt_strokes(&mut state, &ui_onload.ctx, strokes.clone());
                     }
                 }
                 ui_onload.set_load_busy(false);
@@ -709,7 +705,6 @@ fn start_app() -> Result<(), JsValue> {
         let down_state = state.clone();
         let down_sender = ws_sender.clone();
         let ui_callback = ui.clone();
-        let down_ctx = ui.ctx.clone();
         let ondown = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             if event.button() != 0 {
                 return;
@@ -824,7 +819,7 @@ fn start_app() -> Result<(), JsValue> {
                                 select.selected_ids.clear();
                                 select.mode = SelectMode::Idle;
                                 state.mode = Mode::Select(select);
-                                redraw(&down_ctx, &mut state);
+                                redraw(&ui_callback.ctx, &mut state);
                                 down_sender.send(&ClientMessage::Remove { ids });
                                 let _ = ui_callback.canvas.set_pointer_capture(event.pointer_id());
                                 return;
@@ -883,7 +878,7 @@ fn start_app() -> Result<(), JsValue> {
                         points: vec![world_point],
                     };
                     state.mode = Mode::Select(select);
-                    redraw(&down_ctx, &mut state);
+                    redraw(&ui_callback.ctx, &mut state);
                     let _ = ui_callback.canvas.set_pointer_capture(event.pointer_id());
                 }
                 Mode::Pan(_) => {
@@ -912,7 +907,7 @@ fn start_app() -> Result<(), JsValue> {
                     state.mode = Mode::Erase(EraseMode::Active {
                         hits: HashSet::new(),
                     });
-                    let removed_ids = erase_hits_at_point(&mut state, &down_ctx, point);
+                    let removed_ids = erase_hits_at_point(&mut state, &ui_callback.ctx, point);
                     for id in removed_ids {
                         down_sender.send(&ClientMessage::Erase { id });
                     }
@@ -942,7 +937,7 @@ fn start_app() -> Result<(), JsValue> {
                     state.mode = Mode::Draw(draw);
                     start_stroke(
                         &mut state,
-                        &down_ctx,
+                        &ui_callback.ctx,
                         id.clone(),
                         color.clone(),
                         size,
@@ -969,7 +964,6 @@ fn start_app() -> Result<(), JsValue> {
         let move_sender = ws_sender.clone();
         let ui_callback = ui.clone();
         let move_window = window.clone();
-        let move_ctx = ui.ctx.clone();
         let onmove = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             for event in coalesced_pointer_events(&event) {
                 if is_touch_event(&event) {
@@ -998,7 +992,7 @@ fn start_app() -> Result<(), JsValue> {
                             state.zoom = next_zoom;
                             state.pan_x = center_x - world_center_x * next_zoom;
                             state.pan_y = center_y - world_center_y * next_zoom;
-                            redraw(&move_ctx, &mut state);
+                            redraw(&ui_callback.ctx, &mut state);
                             continue;
                         }
                         state.pinch = None;
@@ -1015,7 +1009,7 @@ fn start_app() -> Result<(), JsValue> {
                             let next_pan_y = origin_y + (event.client_y() as f64 - start_y);
                             state.pan_x = next_pan_x;
                             state.pan_y = next_pan_y;
-                            redraw(&move_ctx, &mut state);
+                            redraw(&ui_callback.ctx, &mut state);
                             continue;
                         }
                     }
@@ -1059,7 +1053,7 @@ fn start_app() -> Result<(), JsValue> {
                         match &mut select.mode {
                             SelectMode::Lasso { points } => {
                                 points.push(world_point);
-                                redraw(&move_ctx, &mut state);
+                                redraw(&ui_callback.ctx, &mut state);
                             }
                             SelectMode::Move {
                                 start,
@@ -1186,7 +1180,7 @@ fn start_app() -> Result<(), JsValue> {
                             }
                         }
                         if let Some(updated) = pending_update {
-                            apply_transformed_strokes(&mut state, &move_ctx, &updated);
+                            apply_transformed_strokes(&mut state, &ui_callback.ctx, &updated);
                         }
                         if let Some(message) = pending_message {
                             move_sender.send(&message);
@@ -1201,7 +1195,7 @@ fn start_app() -> Result<(), JsValue> {
                                 Some(point) => point,
                                 None => continue,
                             };
-                        let removed_ids = erase_hits_at_point(&mut state, &move_ctx, point);
+                        let removed_ids = erase_hits_at_point(&mut state, &ui_callback.ctx, point);
                         for id in removed_ids {
                             move_sender.send(&ClientMessage::Erase { id });
                         }
@@ -1216,7 +1210,7 @@ fn start_app() -> Result<(), JsValue> {
                         let next_pan_y = *origin_y + (event.client_y() as f64 - *start_y);
                         state.pan_x = next_pan_x;
                         state.pan_y = next_pan_y;
-                        redraw(&move_ctx, &mut state);
+                        redraw(&ui_callback.ctx, &mut state);
                     }
                     Mode::Draw(draw) => {
                         if !move_sender.is_open() {
@@ -1239,7 +1233,7 @@ fn start_app() -> Result<(), JsValue> {
                                 Some(point) => point,
                                 None => continue,
                             };
-                        if move_stroke(&mut state, &move_ctx, &id, point) {
+                        if move_stroke(&mut state, &ui_callback.ctx, &id, point) {
                             state.pending_points.entry(id).or_default().push(point);
                             let should_schedule = if state.flush_scheduled {
                                 false
@@ -1270,7 +1264,6 @@ fn start_app() -> Result<(), JsValue> {
         let stop_state = state.clone();
         let stop_sender = ws_sender.clone();
         let ui_callback = ui.clone();
-        let stop_ctx = ui.ctx.clone();
         let onstop = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             let mut state = stop_state.borrow_mut();
             if is_touch_event(&event) {
@@ -1330,7 +1323,7 @@ fn start_app() -> Result<(), JsValue> {
                     if let Mode::Select(select) = &mut state.mode {
                         select.mode = SelectMode::Idle;
                     }
-                    redraw(&stop_ctx, &mut state);
+                    redraw(&ui_callback.ctx, &mut state);
                     drop(state);
                     if let Some(ids) = end_ids {
                         if !ids.is_empty() {
@@ -1399,7 +1392,6 @@ fn start_app() -> Result<(), JsValue> {
     {
         let zoom_state = state.clone();
         let ui_callback = ui.clone();
-        let zoom_ctx = ui.ctx.clone();
         let onwheel = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
             let wheel_event = match event.dyn_into::<web_sys::WheelEvent>() {
                 Ok(event) => event,
@@ -1426,7 +1418,7 @@ fn start_app() -> Result<(), JsValue> {
                 state.zoom = next_zoom;
                 state.pan_x = next_pan_x;
                 state.pan_y = next_pan_y;
-                redraw(&zoom_ctx, &mut state);
+                redraw(&ui_callback.ctx, &mut state);
             }
         });
         ui.canvas
