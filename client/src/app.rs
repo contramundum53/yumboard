@@ -1043,7 +1043,7 @@ fn start_app() -> Result<(), JsValue> {
                             let center_y = (points[0].1 + points[1].1) / 2.0;
                             let distance = pinch_distance(&points).max(0.001);
                             let scale = distance / start_distance;
-                            let next_zoom = (pinch_zoom * scale).clamp(0.4, 4.0);
+                            let next_zoom = pinch_zoom * scale;
                             state.zoom = next_zoom;
                             state.pan_x = center_x - world_center_x * next_zoom;
                             state.pan_y = center_y - world_center_y * next_zoom;
