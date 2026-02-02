@@ -105,10 +105,11 @@ pub fn run() -> Result<(), JsValue> {
 
 fn start_app() -> Result<(), JsValue> {
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("Missing window"))?;
-    let document = window
-        .document()
-        .ok_or_else(|| JsValue::from_str("Missing document"))?;
-    let ui = Rc::new(Ui::from_document(document)?);
+    let ui = Rc::new(Ui::from_document(
+        window
+            .document()
+            .ok_or_else(|| JsValue::from_str("Missing document"))?,
+    )?);
 
     let state = Rc::new(RefCell::new(State {
         strokes: Vec::new(),
