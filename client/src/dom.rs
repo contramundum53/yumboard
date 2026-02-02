@@ -50,46 +50,6 @@ impl Ui {
             .dyn_into::<CanvasRenderingContext2d>()?;
         ctx.set_line_cap("round");
         ctx.set_line_join("round");
-        let body = document
-            .body()
-            .ok_or_else(|| JsValue::from_str("Missing document body"))?;
-        let reload_banner = document.create_element("div")?.dyn_into::<HtmlElement>()?;
-        reload_banner.set_id("reloadBanner");
-        let style = reload_banner.style();
-        let _ = style.set_property("position", "fixed");
-        let _ = style.set_property("left", "16px");
-        let _ = style.set_property("right", "16px");
-        let _ = style.set_property("bottom", "16px");
-        let _ = style.set_property("padding", "12px 14px");
-        let _ = style.set_property("background", "rgba(18, 18, 18, 0.92)");
-        let _ = style.set_property("color", "#fff");
-        let _ = style.set_property("border-radius", "8px");
-        let _ = style.set_property("font-size", "14px");
-        let _ = style.set_property("display", "none");
-        let _ = style.set_property("align-items", "center");
-        let _ = style.set_property("gap", "12px");
-        let _ = style.set_property("z-index", "9999");
-
-        let reload_message = document
-            .create_element("span")?
-            .dyn_into::<HtmlSpanElement>()?;
-        reload_message.set_text_content(Some("Connection lost. Please reload the page."));
-
-        let reload_button = document
-            .create_element("button")?
-            .dyn_into::<HtmlButtonElement>()?;
-        reload_button.set_text_content(Some("Reload"));
-        let button_style = reload_button.style();
-        let _ = button_style.set_property("padding", "6px 10px");
-        let _ = button_style.set_property("border", "none");
-        let _ = button_style.set_property("border-radius", "6px");
-        let _ = button_style.set_property("background", "#4f8cff");
-        let _ = button_style.set_property("color", "#fff");
-        let _ = button_style.set_property("font-weight", "600");
-
-        reload_banner.append_child(&reload_message)?;
-        reload_banner.append_child(&reload_button)?;
-        body.append_child(&reload_banner)?;
         Ok(Self {
             color_input: get_element(&document, "color")?,
             palette_el: get_element(&document, "palette")?,
@@ -114,12 +74,12 @@ impl Ui {
             status_text: document
                 .get_element_by_id("statusText")
                 .ok_or_else(|| JsValue::from_str("Missing status text"))?,
+            reload_banner: get_element(&document, "reloadBanner")?,
+            reload_message: get_element(&document, "reloadMessage")?,
+            reload_button: get_element(&document, "reloadButton")?,
             document,
             canvas,
             ctx,
-            reload_banner,
-            reload_message,
-            reload_button,
         })
     }
 
@@ -187,7 +147,7 @@ impl Ui {
 
     pub fn show_reload_banner(&self, message: &str) {
         self.reload_message.set_text_content(Some(message));
-        let _ = self.reload_banner.style().set_property("display", "flex");
+        let _ = self.reload_banner.remove_attribute("hidden");
     }
 
     pub fn set_tool_button(&self, button: &HtmlButtonElement, active: bool) {
