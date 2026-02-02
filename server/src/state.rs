@@ -17,19 +17,9 @@ pub struct AppState {
     pub storage: Arc<dyn Storage>,
 }
 
-#[derive(Clone, Debug, Encode, Decode)]
+#[derive(Clone, Debug, Default, Encode, Decode)]
 pub struct PersistentSessionData {
-    pub version: u32,
     pub strokes: Vec<Stroke>,
-}
-
-impl Default for PersistentSessionData {
-    fn default() -> Self {
-        Self {
-            version: 1,
-            strokes: Vec::new(),
-        }
-    }
 }
 
 pub struct Session {
@@ -88,7 +78,6 @@ impl Session {
 
     pub fn to_persistent_session_data(&self) -> PersistentSessionData {
         PersistentSessionData {
-            version: 1,
             strokes: self.strokes.clone(),
         }
     }

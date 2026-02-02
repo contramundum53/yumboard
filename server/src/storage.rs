@@ -6,6 +6,11 @@ use aws_config::BehaviorVersion;
 use aws_credential_types::Credentials;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client;
+use yumboard_shared::Stroke;
+
+const SESSION_FILE_MAGIC: [u8; 4] = *b"YBSS";
+const SESSION_FILE_VERSION: u32 = 1;
+const SESSION_HEADER_LEN: usize = 8;
 
 #[async_trait]
 pub trait Storage: Send + Sync {
@@ -41,13 +46,58 @@ impl Storage for FileStorage {
 }
 
 fn encode_data(data: &PersistentSessionData) -> Vec<u8> {
-    bincode::encode_to_vec(data, bincode::config::standard()).unwrap_or_default()
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&SESSION_FILE_MAGIC);
+    payload.extend_from_slice(&SESSION_FILE_VERSION.to_le_bytes());
+    let body = bincode::encode_to_vec(data, bincode::config::standard()).unwrap_or_default();
+    payload.extend_from_slice(&body);
+    payload
 }
 
 fn decode_data(payload: &[u8]) -> Option<PersistentSessionData> {
-    bincode::decode_from_slice(payload, bincode::config::standard())
-        .map(|(data, _)| data)
-        .ok()
+    if payload.len() >= SESSION_HEADER_LEN && payload.starts_with(&SESSION_FILE_MAGIC) {
+        let version = u32::from_le_bytes(payload[4..8].try_into().ok()?);
+        let body = &payload[SESSION_HEADER_LEN..];
+        return match version {
+            1 => bincode::decode_from_slice(body, bincode::config::standard())
+                .map(|(data, _)| data)
+                .ok(),
+            _ => {
+                eprintln!("Unsupported session file version: {version}");
+                None
+            }
+        };
+    }
+
+    #[derive(bincode::Decode)]
+    struct LegacyPersistentSessionData {
+        version: u32,
+        strokes: Vec<Stroke>,
+    }
+
+    if let Ok((legacy, _)) = bincode::decode_from_slice::<LegacyPersistentSessionData, _>(
+        payload,
+        bincode::config::standard(),
+    ) {
+        let _ = legacy.version;
+        return Some(PersistentSessionData {
+            strokes: legacy.strokes,
+        });
+    }
+
+    if let Ok((data, _)) =
+        bincode::decode_from_slice::<PersistentSessionData, _>(payload, bincode::config::standard())
+    {
+        return Some(data);
+    }
+
+    if let Ok((strokes, _)) =
+        bincode::decode_from_slice::<Vec<Stroke>, _>(payload, bincode::config::standard())
+    {
+        return Some(PersistentSessionData { strokes });
+    }
+
+    None
 }
 
 #[derive(Clone, Debug)]

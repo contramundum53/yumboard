@@ -27,7 +27,6 @@ pub async fn get_or_create_session(
         .await
         .unwrap_or_default();
     let sanitized = PersistentSessionData {
-        version: 1,
         strokes: sanitize_strokes(data.strokes),
     };
     let session = Arc::new(tokio::sync::RwLock::new(
