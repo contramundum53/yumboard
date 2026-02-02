@@ -247,7 +247,9 @@ fn start_app() -> Result<(), JsValue> {
     {
         let ws_sender = ws_sender.clone();
         let ui_callback = ui.clone();
+        let ws_offline_prompted = ws_offline_prompted.clone();
         let onclick = Closure::<dyn FnMut()>::new(move || {
+            ws_offline_prompted.set(false);
             ui_callback.hide_reload_banner();
             if ws_sender.reconnect().is_err() {
                 ui_callback.show_reload_banner("Connection error. Please reload the page.");
