@@ -166,23 +166,27 @@ fn start_app() -> Result<(), JsValue> {
             WsEvent::Close => {
                 ui.set_status("closed", "Offline");
                 if !ws_offline_prompted.replace(true) {
-                    if window
-                        .confirm_with_message("Connection lost. Please reload the page.")
-                        .unwrap_or(false)
-                    {
+                    ui.show_reload_banner("Connection lost. Please reload the page.");
+                    let window = window.clone();
+                    let button = ui.reload_button.clone();
+                    let onclick = Closure::<dyn FnMut()>::new(move || {
                         let _ = window.location().reload();
-                    }
+                    });
+                    button.set_onclick(Some(onclick.as_ref().unchecked_ref()));
+                    onclick.forget();
                 }
             }
             WsEvent::Error => {
                 ui.set_status("closed", "Connection error");
                 if !ws_offline_prompted.replace(true) {
-                    if window
-                        .confirm_with_message("Connection error. Please reload the page.")
-                        .unwrap_or(false)
-                    {
+                    ui.show_reload_banner("Connection error. Please reload the page.");
+                    let window = window.clone();
+                    let button = ui.reload_button.clone();
+                    let onclick = Closure::<dyn FnMut()>::new(move || {
                         let _ = window.location().reload();
-                    }
+                    });
+                    button.set_onclick(Some(onclick.as_ref().unchecked_ref()));
+                    onclick.forget();
                 }
             }
             WsEvent::Message(message) => {
