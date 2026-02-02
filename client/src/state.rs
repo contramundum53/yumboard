@@ -1,4 +1,6 @@
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use wasm_bindgen::prelude::Closure;
 use web_sys::{CanvasRenderingContext2d, FileReader, HtmlCanvasElement, ProgressEvent};
@@ -118,6 +120,10 @@ pub struct State {
     pub pan_y: f64,
     pub palette: Vec<String>,
     pub mode: Mode,
+    pub pending_points: Rc<RefCell<HashMap<StrokeId, Vec<Point>>>>,
+    pub flush_scheduled: Rc<Cell<bool>>,
+    pub active_draw_pointer: Rc<Cell<Option<i32>>>,
+    pub active_draw_timestamp: Rc<Cell<f64>>,
     pub touch_points: HashMap<i32, (f64, f64)>,
     pub pinch: Option<PinchState>,
     pub touch_pan: Option<PanMode>,

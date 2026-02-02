@@ -11,7 +11,7 @@ use web_sys::{
     ProgressEvent,
 };
 
-use yumboard_shared::{ClientMessage, Point, ServerMessage, Stroke, StrokeId, TransformOp};
+use yumboard_shared::{ClientMessage, ServerMessage, Stroke, TransformOp};
 
 use crate::actions::{
     adopt_strokes, apply_transform_operation, apply_transformed_strokes, clear_board, end_stroke,
@@ -233,6 +233,10 @@ fn start_app() -> Result<(), JsValue> {
             mode: DrawMode::Idle,
             palette_selected: 0,
         }),
+        pending_points: Rc::new(RefCell::new(HashMap::new())),
+        flush_scheduled: Rc::new(Cell::new(false)),
+        active_draw_pointer: Rc::new(Cell::new(None)),
+        active_draw_timestamp: Rc::new(Cell::new(0.0)),
         touch_points: HashMap::new(),
         pinch: None,
         touch_pan: None,
@@ -318,10 +322,10 @@ fn start_app() -> Result<(), JsValue> {
         }
     })?;
 
-    let pending_points = Rc::new(RefCell::new(HashMap::<StrokeId, Vec<Point>>::new()));
-    let flush_scheduled = Rc::new(Cell::new(false));
-    let active_draw_pointer: Rc<Cell<Option<i32>>> = Rc::new(Cell::new(None));
-    let active_draw_timestamp = Rc::new(Cell::new(0.0));
+    let pending_points = state.borrow().pending_points.clone();
+    let flush_scheduled = state.borrow().flush_scheduled.clone();
+    let active_draw_pointer = state.borrow().active_draw_pointer.clone();
+    let active_draw_timestamp = state.borrow().active_draw_timestamp.clone();
     let schedule_flush: Rc<dyn Fn()> = Rc::new({
         let pending_points = pending_points.clone();
         let flush_scheduled = flush_scheduled.clone();
