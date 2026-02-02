@@ -6,6 +6,7 @@ use uuid::Uuid;
 use yumboard_shared::{Stroke, StrokeId};
 
 use crate::storage::Storage;
+use bincode::{Decode, Encode};
 
 pub const MAX_STROKES: usize = 2000;
 pub const MAX_POINTS_PER_STROKE: usize = 5000;
@@ -14,6 +15,11 @@ pub const MAX_POINTS_PER_STROKE: usize = 5000;
 pub struct AppState {
     pub sessions: Arc<RwLock<HashMap<String, Arc<RwLock<Session>>>>>,
     pub storage: Arc<dyn Storage>,
+}
+
+#[derive(Clone, Debug, Default, Encode, Decode)]
+pub struct PersistentSessionData {
+    pub strokes: Vec<Stroke>,
 }
 
 pub struct Session {
@@ -63,6 +69,16 @@ impl Session {
             peers: HashMap::new(),
             transform_sessions: HashMap::new(),
             dirty: false,
+        }
+    }
+
+    pub fn from_persistent_session_data(data: PersistentSessionData) -> Self {
+        Self::new(data.strokes)
+    }
+
+    pub fn to_persistent_session_data(&self) -> PersistentSessionData {
+        PersistentSessionData {
+            strokes: self.strokes.clone(),
         }
     }
 }

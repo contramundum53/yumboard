@@ -1,10 +1,8 @@
 use std::sync::Arc;
 
-use uuid::Uuid;
-use yumboard_shared::Stroke;
-
 use crate::logic::sanitize_strokes;
-use crate::state::{AppState, Session};
+use crate::state::{AppState, PersistentSessionData, Session};
+use uuid::Uuid;
 
 pub fn new_session_id() -> String {
     Uuid::new_v4().to_string()
@@ -23,14 +21,17 @@ pub async fn get_or_create_session(
         return session;
     }
     eprintln!("Loading/Creating session {session_id}...");
-    let strokes = state
+    let data = state
         .storage
         .load_session(session_id)
         .await
         .unwrap_or_default();
-    let session = Arc::new(tokio::sync::RwLock::new(Session::new(sanitize_strokes(
-        strokes,
-    ))));
+    let sanitized = PersistentSessionData {
+        strokes: sanitize_strokes(data.strokes),
+    };
+    let session = Arc::new(tokio::sync::RwLock::new(
+        Session::from_persistent_session_data(sanitized),
+    ));
     let mut sessions = state.sessions.write().await;
     let entry = sessions
         .entry(session_id.to_string())
@@ -38,6 +39,6 @@ pub async fn get_or_create_session(
     entry.clone()
 }
 
-pub async fn save_session(state: &AppState, session_id: &str, strokes: &[Stroke]) {
-    state.storage.save_session(session_id, strokes).await;
+pub async fn save_session(state: &AppState, session_id: &str, data: &PersistentSessionData) {
+    state.storage.save_session(session_id, data).await;
 }

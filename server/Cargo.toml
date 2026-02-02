@@ -7,7 +7,7 @@ edition = "2021"
 axum-server = { version = "0.8", features = ["tls-rustls"] }
 axum = { version = "0.7", features = ["ws"] }
 async-trait = "0.1"
-bincode = { version = "2", features = ["serde"] }
+bincode = { version = "2", features = ["serde", "derive"] }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }

@@ -58,15 +58,15 @@ async fn save_all_sessions(state: &AppState, reset_dirty: bool) {
             .collect::<Vec<_>>()
     };
     for (session_id, session) in sessions {
-        let strokes = {
+        let data = {
             let session = session.read().await;
             if !session.dirty {
                 continue;
             }
-            session.strokes.clone()
+            session.to_persistent_session_data()
         };
         eprint!("Saving session {session_id}... ");
-        save_session(state, &session_id, &strokes).await;
+        save_session(state, &session_id, &data).await;
         eprintln!("done.");
         if reset_dirty {
             session.write().await.dirty = false;
