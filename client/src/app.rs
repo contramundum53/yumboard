@@ -171,16 +171,6 @@ fn start_app() -> Result<(), JsValue> {
         ui.show_color_input(selected);
     }
 
-    {
-        let window = window.clone();
-        let onclick = Closure::<dyn FnMut()>::new(move || {
-            let _ = window.location().reload();
-        });
-        ui.reload_button
-            .set_onclick(Some(onclick.as_ref().unchecked_ref()));
-        onclick.forget();
-    }
-
     let ws_offline_prompted = Rc::new(std::cell::Cell::new(false));
     let redraw_scheduled = Rc::new(Cell::new(false));
     let ws_sender = connect_ws(&window, {
@@ -251,6 +241,16 @@ fn start_app() -> Result<(), JsValue> {
             }
         }
     })?;
+
+    {
+        let ws_sender = ws_sender.clone();
+        let onclick = Closure::<dyn FnMut()>::new(move || {
+            let _ = ws_sender.reconnect();
+        });
+        ui.reload_button
+            .set_onclick(Some(onclick.as_ref().unchecked_ref()));
+        onclick.forget();
+    }
 
     {
         let resize_state = state.clone();
