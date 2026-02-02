@@ -2,13 +2,11 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use js_sys::{Function, Reflect};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
-    CanvasRenderingContext2d, Document, Element, Event, FileReader, HtmlAnchorElement,
-    HtmlButtonElement, HtmlCanvasElement, HtmlElement, HtmlInputElement, HtmlSpanElement,
-    KeyboardEvent, PointerEvent, ProgressEvent,
+    CanvasRenderingContext2d, Event, FileReader, HtmlAnchorElement, KeyboardEvent, PointerEvent,
+    ProgressEvent,
 };
 
 use yumboard_shared::{ClientMessage, ServerMessage, Stroke, TransformOp};
@@ -19,8 +17,9 @@ use crate::actions::{
     replace_stroke_local, restore_stroke, sanitize_size, start_stroke,
 };
 use crate::dom::{
-    event_to_point, get_element, resize_canvas, set_canvas_mode, set_status, set_tool_button,
-    update_size_label,
+    coalesced_pointer_events, event_to_point, hide_color_input, is_touch_event, resize_canvas,
+    set_canvas_mode, set_load_busy, set_status, set_tool_button, show_color_input, sync_tool_ui,
+    update_size_label, Ui,
 };
 use crate::geometry;
 use crate::geometry::{
@@ -65,155 +64,12 @@ fn schedule_flush(
     let _ = window.request_animation_frame(cb.unchecked_ref());
 }
 
-struct Ui {
-    document: Document,
-    canvas: HtmlCanvasElement,
-    color_input: HtmlInputElement,
-    palette_el: HtmlElement,
-    size_input: HtmlInputElement,
-    size_value: HtmlSpanElement,
-    clear_button: HtmlButtonElement,
-    save_button: HtmlButtonElement,
-    save_menu: HtmlElement,
-    save_json_button: HtmlButtonElement,
-    save_pdf_button: HtmlButtonElement,
-    load_button: HtmlButtonElement,
-    load_file: HtmlInputElement,
-    lasso_button: HtmlButtonElement,
-    eraser_button: HtmlButtonElement,
-    pan_button: HtmlButtonElement,
-    home_button: HtmlButtonElement,
-    undo_button: HtmlButtonElement,
-    redo_button: HtmlButtonElement,
-    status_el: Element,
-    status_text: Element,
-}
-
-impl Ui {
-    fn from_document(document: Document) -> Result<Self, JsValue> {
-        let canvas: HtmlCanvasElement = get_element(&document, "board")?;
-        Ok(Self {
-            color_input: get_element(&document, "color")?,
-            palette_el: get_element(&document, "palette")?,
-            size_input: get_element(&document, "size")?,
-            size_value: get_element(&document, "sizeValue")?,
-            clear_button: get_element(&document, "clear")?,
-            save_button: get_element(&document, "save")?,
-            save_menu: get_element(&document, "saveMenu")?,
-            save_json_button: get_element(&document, "saveJson")?,
-            save_pdf_button: get_element(&document, "savePdf")?,
-            load_button: get_element(&document, "load")?,
-            load_file: get_element(&document, "loadFile")?,
-            lasso_button: get_element(&document, "lasso")?,
-            eraser_button: get_element(&document, "eraser")?,
-            pan_button: get_element(&document, "pan")?,
-            home_button: get_element(&document, "home")?,
-            undo_button: get_element(&document, "undo")?,
-            redo_button: get_element(&document, "redo")?,
-            status_el: document
-                .get_element_by_id("status")
-                .ok_or_else(|| JsValue::from_str("Missing status element"))?,
-            status_text: document
-                .get_element_by_id("statusText")
-                .ok_or_else(|| JsValue::from_str("Missing status text"))?,
-            document,
-            canvas,
-        })
-    }
-}
-
 fn palette_selected(mode: &Mode) -> Option<usize> {
     match mode {
         Mode::Draw(draw) => Some(draw.palette_selected),
         Mode::Loading(loading) => palette_selected(loading.previous.as_ref()),
         _ => None,
     }
-}
-
-fn sync_tool_ui(
-    state: &State,
-    canvas: &HtmlCanvasElement,
-    pan_button: &HtmlButtonElement,
-    eraser_button: &HtmlButtonElement,
-    lasso_button: &HtmlButtonElement,
-    dragging: bool,
-) {
-    let is_pan = matches!(state.mode, Mode::Pan(_));
-    let is_erase = matches!(state.mode, Mode::Erase(_));
-    let is_select = matches!(state.mode, Mode::Select(_));
-    set_tool_button(pan_button, is_pan);
-    set_tool_button(eraser_button, is_erase);
-    set_tool_button(lasso_button, is_select);
-    set_canvas_mode(canvas, &state.mode, dragging);
-}
-
-fn hide_color_input(color_input: &HtmlInputElement) {
-    color_input.set_class_name("hidden-color");
-}
-
-fn show_color_input(
-    palette_el: &HtmlElement,
-    color_input: &HtmlInputElement,
-    selected: Option<usize>,
-) {
-    let Some(index) = selected else {
-        hide_color_input(color_input);
-        return;
-    };
-    let selector = format!("[data-index=\"{index}\"]");
-    let Ok(Some(node)) = palette_el.query_selector(&selector) else {
-        hide_color_input(color_input);
-        return;
-    };
-    let rect = node.get_bounding_client_rect();
-    let toolbar_rect = palette_el
-        .closest(".toolbar")
-        .ok()
-        .flatten()
-        .map(|toolbar: Element| toolbar.get_bounding_client_rect());
-    let style = color_input.style();
-    let (left, top) = if let Some(toolbar_rect) = toolbar_rect {
-        (
-            rect.left() - toolbar_rect.left(),
-            rect.top() - toolbar_rect.top(),
-        )
-    } else {
-        (rect.left(), rect.top())
-    };
-    let _ = style.set_property("left", &format!("{}px", left));
-    let _ = style.set_property("top", &format!("{}px", top));
-    let _ = style.set_property("width", &format!("{}px", rect.width()));
-    let _ = style.set_property("height", &format!("{}px", rect.height()));
-    color_input.set_class_name("hidden-color active");
-}
-
-fn coalesced_pointer_events(event: &PointerEvent) -> Vec<PointerEvent> {
-    let get_coalesced_events =
-        Reflect::get(event.as_ref(), &JsValue::from_str("getCoalescedEvents"))
-            .ok()
-            .and_then(|value| value.dyn_into::<Function>().ok());
-
-    let mut out = Vec::new();
-    if let Some(get_coalesced_events) = get_coalesced_events {
-        if let Ok(events) = get_coalesced_events
-            .call0(event.as_ref())
-            .and_then(|value| value.dyn_into::<js_sys::Array>())
-        {
-            out.reserve(events.length() as usize + 1);
-            for index in 0..events.length() {
-                if let Ok(event) = events.get(index).dyn_into::<PointerEvent>() {
-                    out.push(event);
-                }
-            }
-        }
-    }
-    out.push(event.clone());
-    out.sort_by(|a, b| {
-        a.time_stamp()
-            .partial_cmp(&b.time_stamp())
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    out
 }
 
 fn take_loading_previous(state: &mut State) -> Option<Mode> {
@@ -236,19 +92,10 @@ fn take_loading_previous(state: &mut State) -> Option<Mode> {
     }
 }
 
-fn is_touch_event(event: &PointerEvent) -> bool {
-    event.pointer_type() == "touch"
-}
-
 fn pinch_distance(points: &[(f64, f64)]) -> f64 {
     let dx = points[0].0 - points[1].0;
     let dy = points[0].1 - points[1].1;
     (dx * dx + dy * dy).sqrt()
-}
-
-fn set_load_busy(load_button: &HtmlButtonElement, busy: bool) {
-    let value = if busy { "true" } else { "false" };
-    let _ = load_button.set_attribute("aria-busy", value);
 }
 
 fn read_load_payload(event: &ProgressEvent) -> Option<Vec<Stroke>> {
