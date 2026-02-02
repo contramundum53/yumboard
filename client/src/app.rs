@@ -17,9 +17,8 @@ use crate::actions::{
     replace_stroke_local, restore_stroke, sanitize_size, start_stroke,
 };
 use crate::dom::{
-    coalesced_pointer_events, event_to_point, hide_color_input, is_touch_event, resize_canvas,
-    set_canvas_mode, set_load_busy, set_status, set_tool_button, show_color_input, sync_tool_ui,
-    update_size_label, Ui,
+    coalesced_pointer_events, event_to_point, is_touch_event, resize_canvas, set_canvas_mode,
+    set_tool_button, Ui,
 };
 use crate::geometry;
 use crate::geometry::{
@@ -150,13 +149,8 @@ fn start_app() -> Result<(), JsValue> {
         touch_pan: None,
     }));
 
-    update_size_label(&ui.size_input, &ui.size_value);
-    set_status(
-        &ui.status_el,
-        &ui.status_text,
-        "connecting",
-        "Connecting...",
-    );
+    ui.update_size_label();
+    ui.set_status("connecting", "Connecting...");
     set_tool_button(&ui.lasso_button, false);
     set_tool_button(&ui.eraser_button, false);
     set_tool_button(&ui.pan_button, false);
@@ -170,7 +164,7 @@ fn start_app() -> Result<(), JsValue> {
             }
         }
         render_palette(&ui.document, &ui.palette_el, &state.palette, selected);
-        show_color_input(&ui.palette_el, &ui.color_input, selected);
+        ui.show_color_input(selected);
     }
 
     let ws_sender = connect_ws(&window, {
@@ -179,13 +173,13 @@ fn start_app() -> Result<(), JsValue> {
         let ctx = ctx.clone();
         move |event: WsEvent| match event {
             WsEvent::Open => {
-                set_status(&ui.status_el, &ui.status_text, "open", "Live connection");
+                ui.set_status("open", "Live connection");
             }
             WsEvent::Close => {
-                set_status(&ui.status_el, &ui.status_text, "closed", "Offline");
+                ui.set_status("closed", "Offline");
             }
             WsEvent::Error => {
-                set_status(&ui.status_el, &ui.status_text, "closed", "Connection error");
+                ui.set_status("closed", "Connection error");
             }
             WsEvent::Message(message) => {
                 let mut state = message_state.borrow_mut();
@@ -310,7 +304,7 @@ fn start_app() -> Result<(), JsValue> {
     {
         let ui_callback = ui.clone();
         let oninput = Closure::<dyn FnMut(Event)>::new(move |_| {
-            update_size_label(&ui_callback.size_input, &ui_callback.size_value);
+            ui_callback.update_size_label();
         });
         ui.size_input
             .add_event_listener_with_callback("input", oninput.as_ref().unchecked_ref())?;
@@ -326,21 +320,14 @@ fn start_app() -> Result<(), JsValue> {
                 return;
             }
             state.mode = Mode::Erase(EraseMode::Idle);
-            sync_tool_ui(
-                &state,
-                &ui_callback.canvas,
-                &ui_callback.pan_button,
-                &ui_callback.eraser_button,
-                &ui_callback.lasso_button,
-                false,
-            );
+            ui_callback.sync_tool_ui(&state, false);
             render_palette(
                 &ui_callback.document,
                 &ui_callback.palette_el,
                 &state.palette,
                 palette_selected(&state.mode),
             );
-            hide_color_input(&ui_callback.color_input);
+            ui_callback.hide_color_input();
         });
         ui.eraser_button
             .add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
@@ -359,21 +346,14 @@ fn start_app() -> Result<(), JsValue> {
                 selected_ids: Vec::new(),
                 mode: SelectMode::Idle,
             });
-            sync_tool_ui(
-                &state,
-                &ui_callback.canvas,
-                &ui_callback.pan_button,
-                &ui_callback.eraser_button,
-                &ui_callback.lasso_button,
-                false,
-            );
+            ui_callback.sync_tool_ui(&state, false);
             render_palette(
                 &ui_callback.document,
                 &ui_callback.palette_el,
                 &state.palette,
                 palette_selected(&state.mode),
             );
-            hide_color_input(&ui_callback.color_input);
+            ui_callback.hide_color_input();
         });
         ui.lasso_button
             .add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
@@ -389,21 +369,14 @@ fn start_app() -> Result<(), JsValue> {
                 return;
             }
             state.mode = Mode::Pan(PanMode::Idle);
-            sync_tool_ui(
-                &state,
-                &ui_callback.canvas,
-                &ui_callback.pan_button,
-                &ui_callback.eraser_button,
-                &ui_callback.lasso_button,
-                false,
-            );
+            ui_callback.sync_tool_ui(&state, false);
             render_palette(
                 &ui_callback.document,
                 &ui_callback.palette_el,
                 &state.palette,
                 palette_selected(&state.mode),
             );
-            hide_color_input(&ui_callback.color_input);
+            ui_callback.hide_color_input();
         });
         ui.pan_button
             .add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
@@ -451,25 +424,14 @@ fn start_app() -> Result<(), JsValue> {
                         palette_selected,
                     });
                     ui_callback.color_input.set_value(&color);
-                    sync_tool_ui(
-                        &state,
-                        &ui_callback.canvas,
-                        &ui_callback.pan_button,
-                        &ui_callback.eraser_button,
-                        &ui_callback.lasso_button,
-                        false,
-                    );
+                    ui_callback.sync_tool_ui(&state, false);
                     render_palette(
                         &ui_callback.document,
                         &ui_callback.palette_el,
                         &state.palette,
                         Some(palette_selected),
                     );
-                    show_color_input(
-                        &ui_callback.palette_el,
-                        &ui_callback.color_input,
-                        Some(palette_selected),
-                    );
+                    ui_callback.show_color_input(Some(palette_selected));
                     ui_callback.color_input.click();
                 }
                 PaletteAction::Select(index) => {
@@ -484,25 +446,14 @@ fn start_app() -> Result<(), JsValue> {
                     if let Some(color) = state.palette.get(index).cloned() {
                         ui_callback.color_input.set_value(&color);
                     }
-                    sync_tool_ui(
-                        &state,
-                        &ui_callback.canvas,
-                        &ui_callback.pan_button,
-                        &ui_callback.eraser_button,
-                        &ui_callback.lasso_button,
-                        false,
-                    );
+                    ui_callback.sync_tool_ui(&state, false);
                     render_palette(
                         &ui_callback.document,
                         &ui_callback.palette_el,
                         &state.palette,
                         Some(index),
                     );
-                    show_color_input(
-                        &ui_callback.palette_el,
-                        &ui_callback.color_input,
-                        Some(index),
-                    );
+                    ui_callback.show_color_input(Some(index));
                     if already_selected {
                         ui_callback.color_input.click();
                     }
@@ -535,11 +486,7 @@ fn start_app() -> Result<(), JsValue> {
                 &state.palette,
                 palette_selected(&state.mode),
             );
-            show_color_input(
-                &ui_callback.palette_el,
-                &ui_callback.color_input,
-                palette_selected(&state.mode),
-            );
+            ui_callback.show_color_input(palette_selected(&state.mode));
         });
         ui.color_input
             .add_event_listener_with_callback("input", oninput.as_ref().unchecked_ref())?;
@@ -730,14 +677,14 @@ fn start_app() -> Result<(), JsValue> {
             let ui_onload = ui_callback.clone();
             let onload = Closure::<dyn FnMut(ProgressEvent)>::new(move |event: ProgressEvent| {
                 if !load_sender_onload.is_open() {
-                    set_load_busy(&ui_onload.load_button, false);
+                    ui_onload.set_load_busy(false);
                     return;
                 }
                 let strokes = read_load_payload(&event);
                 {
                     let mut state = load_state_onload.borrow_mut();
                     let Some(previous) = take_loading_previous(&mut state) else {
-                        set_load_busy(&ui_onload.load_button, false);
+                        ui_onload.set_load_busy(false);
                         return;
                     };
                     state.mode = previous;
@@ -745,7 +692,7 @@ fn start_app() -> Result<(), JsValue> {
                         adopt_strokes(&mut state, &load_ctx, strokes.clone());
                     }
                 }
-                set_load_busy(&ui_onload.load_button, false);
+                ui_onload.set_load_busy(false);
                 if let Some(strokes) = strokes {
                     load_sender_onload.send(&ClientMessage::Load { strokes });
                 }
@@ -760,7 +707,7 @@ fn start_app() -> Result<(), JsValue> {
                     onload: Some(onload),
                 });
             }
-            set_load_busy(&ui_callback.load_button, true);
+            ui_callback.set_load_busy(true);
             let _ = reader.read_as_text(&file);
             let mut state = load_state_onchange.borrow_mut();
             if let Mode::Loading(loading) = &mut state.mode {

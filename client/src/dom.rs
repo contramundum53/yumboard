@@ -68,6 +68,68 @@ impl Ui {
             canvas,
         })
     }
+
+    pub fn update_size_label(&self) {
+        self.size_value
+            .set_text_content(Some(&self.size_input.value()));
+    }
+
+    pub fn set_status(&self, state: &str, text: &str) {
+        let _ = self.status_el.set_attribute("data-state", state);
+        self.status_text.set_text_content(Some(text));
+    }
+
+    pub fn set_load_busy(&self, busy: bool) {
+        let value = if busy { "true" } else { "false" };
+        let _ = self.load_button.set_attribute("aria-busy", value);
+    }
+
+    pub fn sync_tool_ui(&self, state: &State, dragging: bool) {
+        let is_pan = matches!(state.mode, Mode::Pan(_));
+        let is_erase = matches!(state.mode, Mode::Erase(_));
+        let is_select = matches!(state.mode, Mode::Select(_));
+        set_tool_button(&self.pan_button, is_pan);
+        set_tool_button(&self.eraser_button, is_erase);
+        set_tool_button(&self.lasso_button, is_select);
+        set_canvas_mode(&self.canvas, &state.mode, dragging);
+    }
+
+    pub fn hide_color_input(&self) {
+        self.color_input.set_class_name("hidden-color");
+    }
+
+    pub fn show_color_input(&self, selected: Option<usize>) {
+        let Some(index) = selected else {
+            self.hide_color_input();
+            return;
+        };
+        let selector = format!("[data-index=\"{index}\"]");
+        let Ok(Some(node)) = self.palette_el.query_selector(&selector) else {
+            self.hide_color_input();
+            return;
+        };
+        let rect = node.get_bounding_client_rect();
+        let toolbar_rect = self
+            .palette_el
+            .closest(".toolbar")
+            .ok()
+            .flatten()
+            .map(|toolbar: Element| toolbar.get_bounding_client_rect());
+        let style = self.color_input.style();
+        let (left, top) = if let Some(toolbar_rect) = toolbar_rect {
+            (
+                rect.left() - toolbar_rect.left(),
+                rect.top() - toolbar_rect.top(),
+            )
+        } else {
+            (rect.left(), rect.top())
+        };
+        let _ = style.set_property("left", &format!("{}px", left));
+        let _ = style.set_property("top", &format!("{}px", top));
+        let _ = style.set_property("width", &format!("{}px", rect.width()));
+        let _ = style.set_property("height", &format!("{}px", rect.height()));
+        self.color_input.set_class_name("hidden-color active");
+    }
 }
 
 pub fn get_element<T: JsCast>(document: &Document, id: &str) -> Result<T, JsValue> {
@@ -77,10 +139,6 @@ pub fn get_element<T: JsCast>(document: &Document, id: &str) -> Result<T, JsValu
     element
         .dyn_into::<T>()
         .map_err(|_| JsValue::from_str(&format!("Invalid element type: {id}")))
-}
-
-pub fn update_size_label(input: &HtmlInputElement, value: &HtmlSpanElement) {
-    value.set_text_content(Some(&input.value()));
 }
 
 pub fn set_tool_button(button: &web_sys::HtmlButtonElement, active: bool) {
@@ -105,63 +163,6 @@ pub fn set_canvas_mode(canvas: &HtmlCanvasElement, mode: &Mode, dragging: bool) 
     if let Ok(element) = canvas.clone().dyn_into::<HtmlElement>() {
         let _ = element.style().set_property("cursor", cursor);
     }
-}
-
-pub fn sync_tool_ui(
-    state: &State,
-    canvas: &HtmlCanvasElement,
-    pan_button: &HtmlButtonElement,
-    eraser_button: &HtmlButtonElement,
-    lasso_button: &HtmlButtonElement,
-    dragging: bool,
-) {
-    let is_pan = matches!(state.mode, Mode::Pan(_));
-    let is_erase = matches!(state.mode, Mode::Erase(_));
-    let is_select = matches!(state.mode, Mode::Select(_));
-    set_tool_button(pan_button, is_pan);
-    set_tool_button(eraser_button, is_erase);
-    set_tool_button(lasso_button, is_select);
-    set_canvas_mode(canvas, &state.mode, dragging);
-}
-
-pub fn hide_color_input(color_input: &HtmlInputElement) {
-    color_input.set_class_name("hidden-color");
-}
-
-pub fn show_color_input(
-    palette_el: &HtmlElement,
-    color_input: &HtmlInputElement,
-    selected: Option<usize>,
-) {
-    let Some(index) = selected else {
-        hide_color_input(color_input);
-        return;
-    };
-    let selector = format!("[data-index=\"{index}\"]");
-    let Ok(Some(node)) = palette_el.query_selector(&selector) else {
-        hide_color_input(color_input);
-        return;
-    };
-    let rect = node.get_bounding_client_rect();
-    let toolbar_rect = palette_el
-        .closest(".toolbar")
-        .ok()
-        .flatten()
-        .map(|toolbar: Element| toolbar.get_bounding_client_rect());
-    let style = color_input.style();
-    let (left, top) = if let Some(toolbar_rect) = toolbar_rect {
-        (
-            rect.left() - toolbar_rect.left(),
-            rect.top() - toolbar_rect.top(),
-        )
-    } else {
-        (rect.left(), rect.top())
-    };
-    let _ = style.set_property("left", &format!("{}px", left));
-    let _ = style.set_property("top", &format!("{}px", top));
-    let _ = style.set_property("width", &format!("{}px", rect.width()));
-    let _ = style.set_property("height", &format!("{}px", rect.height()));
-    color_input.set_class_name("hidden-color active");
 }
 
 pub fn coalesced_pointer_events(event: &PointerEvent) -> Vec<PointerEvent> {
@@ -195,16 +196,6 @@ pub fn coalesced_pointer_events(event: &PointerEvent) -> Vec<PointerEvent> {
 
 pub fn is_touch_event(event: &PointerEvent) -> bool {
     event.pointer_type() == "touch"
-}
-
-pub fn set_load_busy(load_button: &HtmlButtonElement, busy: bool) {
-    let value = if busy { "true" } else { "false" };
-    let _ = load_button.set_attribute("aria-busy", value);
-}
-
-pub fn set_status(status_el: &Element, status_text: &Element, state: &str, text: &str) {
-    let _ = status_el.set_attribute("data-state", state);
-    status_text.set_text_content(Some(text));
 }
 
 pub fn resize_canvas(
