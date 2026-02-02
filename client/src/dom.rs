@@ -149,6 +149,10 @@ impl Ui {
         let _ = self.reload_banner.remove_attribute("hidden");
     }
 
+    pub fn hide_reload_banner(&self) {
+        let _ = self.reload_banner.set_attribute("hidden", "");
+    }
+
     pub fn set_tool_button(&self, button: &HtmlButtonElement, active: bool) {
         let pressed = if active { "true" } else { "false" };
         let _ = button.set_attribute("aria-pressed", pressed);

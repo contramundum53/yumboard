@@ -182,6 +182,8 @@ fn start_app() -> Result<(), JsValue> {
         move |event: WsEvent| match event {
             WsEvent::Open => {
                 ui.set_status("open", "Live connection");
+                ui.hide_reload_banner();
+                ws_offline_prompted.set(false);
             }
             WsEvent::Close => {
                 ui.set_status("closed", "Offline");
