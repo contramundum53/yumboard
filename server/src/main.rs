@@ -15,10 +15,12 @@ mod handlers;
 mod logic;
 mod sessions;
 mod state;
+mod storage;
 
 use crate::handlers::{ping_handler, root_handler, session_handler, ws_handler};
 use crate::sessions::save_session;
 use crate::state::AppState;
+use crate::storage::FileStorage;
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -64,7 +66,7 @@ async fn save_all_sessions(state: &AppState, reset_dirty: bool) {
             session.strokes.clone()
         };
         eprint!("Saving session {session_id}... ");
-        save_session(&state.session_dir, &session_id, &strokes).await;
+        save_session(state, &session_id, &strokes).await;
         eprintln!("done.");
         if reset_dirty {
             session.write().await.dirty = false;
@@ -120,7 +122,7 @@ async fn main() {
 
     let state = AppState {
         sessions: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
-        session_dir,
+        storage: Arc::new(FileStorage::new(session_dir)),
     };
 
     let backup_state = state.clone();

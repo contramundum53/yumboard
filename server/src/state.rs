@@ -1,10 +1,11 @@
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
 use yumboard_shared::{Stroke, StrokeId};
+
+use crate::storage::Storage;
 
 pub const MAX_STROKES: usize = 2000;
 pub const MAX_POINTS_PER_STROKE: usize = 5000;
@@ -12,7 +13,7 @@ pub const MAX_POINTS_PER_STROKE: usize = 5000;
 #[derive(Clone)]
 pub struct AppState {
     pub sessions: Arc<RwLock<HashMap<String, Arc<RwLock<Session>>>>>,
-    pub session_dir: PathBuf,
+    pub storage: Arc<dyn Storage>,
 }
 
 pub struct Session {

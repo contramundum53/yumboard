@@ -182,7 +182,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, session_id: String) {
     }
     if let Some(strokes) = maybe_strokes {
         eprint!("Saving finished session {session_id}... ");
-        save_session(&state.session_dir, &session_id, &strokes).await;
+        save_session(&state, &session_id, &strokes).await;
         eprintln!("done.");
     }
     if should_remove {
