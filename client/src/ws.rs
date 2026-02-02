@@ -18,13 +18,19 @@ pub enum WsEvent {
     Message(ServerMessage),
 }
 
+type WsHandler = Rc<RefCell<dyn FnMut(WsEvent)>>;
+
 pub struct WsSender {
-    socket: WebSocket,
+    socket: RefCell<WebSocket>,
+    window: Window,
+    on_event: WsHandler,
+    open_reported: Rc<Cell<bool>>,
+    beforeunload_bound: Cell<bool>,
 }
 
 impl WsSender {
     pub fn is_open(&self) -> bool {
-        self.socket.ready_state() == WebSocket::OPEN
+        self.socket.borrow().ready_state() == WebSocket::OPEN
     }
 
     pub fn send(&self, message: &ClientMessage) {
@@ -32,8 +38,148 @@ impl WsSender {
             return;
         }
         if let Ok(payload) = bincode::encode_to_vec(message, bincode::config::standard()) {
-            let _ = self.socket.send_with_u8_array(&payload);
+            let _ = self.socket.borrow().send_with_u8_array(&payload);
         }
+    }
+
+    pub fn reconnect(self: &Rc<Self>) -> Result<(), JsValue> {
+        self.open_reported.set(false);
+        let socket = create_socket(&self.window)?;
+        {
+            let mut current = self.socket.borrow_mut();
+            let _ = current.close();
+            *current = socket;
+        }
+        self.attach_listeners()?;
+        Ok(())
+    }
+
+    pub fn close(&self) {
+        let _ = self.socket.borrow().close();
+    }
+
+    fn attach_listeners(self: &Rc<Self>) -> Result<(), JsValue> {
+        let socket = self.socket.borrow().clone();
+
+        {
+            let on_event = self.on_event.clone();
+            let open_reported = self.open_reported.clone();
+            let onopen = Closure::<dyn FnMut(Event)>::new(move |_| {
+                open_reported.set(true);
+                on_event.borrow_mut()(WsEvent::Open);
+            });
+            socket.set_onopen(Some(onopen.as_ref().unchecked_ref()));
+            onopen.forget();
+        }
+
+        {
+            let on_event = self.on_event.clone();
+            let open_reported = self.open_reported.clone();
+            let onclose = Closure::<dyn FnMut(CloseEvent)>::new(move |_| {
+                open_reported.set(false);
+                on_event.borrow_mut()(WsEvent::Close);
+            });
+            socket.set_onclose(Some(onclose.as_ref().unchecked_ref()));
+            onclose.forget();
+        }
+
+        {
+            let on_event = self.on_event.clone();
+            let open_reported = self.open_reported.clone();
+            let onerror = Closure::<dyn FnMut(Event)>::new(move |_| {
+                open_reported.set(false);
+                on_event.borrow_mut()(WsEvent::Error);
+            });
+            socket.set_onerror(Some(onerror.as_ref().unchecked_ref()));
+            onerror.forget();
+        }
+
+        {
+            let on_event = self.on_event.clone();
+            let open_reported = self.open_reported.clone();
+            let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
+                if !open_reported.replace(true) {
+                    on_event.borrow_mut()(WsEvent::Open);
+                }
+
+                let message = if let Ok(buffer) = event.data().dyn_into::<js_sys::ArrayBuffer>() {
+                    let bytes = Uint8Array::new(&buffer).to_vec();
+                    match bincode::decode_from_slice::<ServerMessage, _>(
+                        &bytes,
+                        bincode::config::standard(),
+                    ) {
+                        Ok((message, _)) => message,
+                        Err(error) => {
+                            web_sys::console::error_1(
+                                &format!("WS message bincode parse error: {error}").into(),
+                            );
+                            return;
+                        }
+                    }
+                } else if let Some(text) = event.data().as_string() {
+                    match serde_json::from_str::<ServerMessage>(&text) {
+                        Ok(message) => message,
+                        Err(error) => {
+                            let snippet = if text.len() <= 200 {
+                                text
+                            } else {
+                                format!("{}...", &text[..200])
+                            };
+                            web_sys::console::error_1(
+                                &format!(
+                                    "WS message JSON parse error: {error} payload={snippet:?}"
+                                )
+                                .into(),
+                            );
+                            return;
+                        }
+                    }
+                } else {
+                    web_sys::console::error_2(
+                        &"WS message data is not a string or arraybuffer".into(),
+                        &event.data(),
+                    );
+                    return;
+                };
+
+                on_event.borrow_mut()(WsEvent::Message(message));
+            });
+            socket.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
+            onmessage.forget();
+        }
+
+        if should_kick_safari_ws(&self.window) {
+            for delay_ms in [250, 6000] {
+                let socket = socket.clone();
+                let window_cb = self.window.clone();
+                let onkick = Closure::<dyn FnMut()>::new(move || {
+                    if socket.ready_state() == WebSocket::CONNECTING {
+                        let _ = window_cb.fetch_with_str(&ping_url());
+                    }
+                });
+                let _ = self
+                    .window
+                    .set_timeout_with_callback_and_timeout_and_arguments_0(
+                        onkick.as_ref().unchecked_ref(),
+                        delay_ms,
+                    );
+                onkick.forget();
+            }
+        }
+
+        if !self.beforeunload_bound.replace(true) {
+            let sender = self.clone();
+            let onbeforeunload = Closure::<dyn FnMut(Event)>::new(move |_| {
+                sender.close();
+            });
+            self.window.add_event_listener_with_callback(
+                "beforeunload",
+                onbeforeunload.as_ref().unchecked_ref(),
+            )?;
+            onbeforeunload.forget();
+        }
+
+        Ok(())
     }
 }
 
@@ -69,10 +215,7 @@ fn ping_url() -> String {
     format!("/ping?t={now}")
 }
 
-pub fn connect_ws(
-    window: &Window,
-    on_event: impl 'static + FnMut(WsEvent),
-) -> Result<Rc<WsSender>, JsValue> {
+fn create_socket(window: &Window) -> Result<WebSocket, JsValue> {
     let ws_url = websocket_url(window)?;
     let socket = WebSocket::new(&ws_url)?;
     let _ = Reflect::set(
@@ -80,127 +223,21 @@ pub fn connect_ws(
         &JsValue::from_str("binaryType"),
         &JsValue::from_str("arraybuffer"),
     );
+    Ok(socket)
+}
 
+pub fn connect_ws(
+    window: &Window,
+    on_event: impl 'static + FnMut(WsEvent),
+) -> Result<Rc<WsSender>, JsValue> {
+    let socket = create_socket(window)?;
     let sender = Rc::new(WsSender {
-        socket: socket.clone(),
+        socket: RefCell::new(socket),
+        window: window.clone(),
+        on_event: Rc::new(RefCell::new(on_event)),
+        open_reported: Rc::new(Cell::new(false)),
+        beforeunload_bound: Cell::new(false),
     });
-
-    let on_event = Rc::new(RefCell::new(on_event));
-    let open_reported = Rc::new(Cell::new(false));
-
-    {
-        let on_event = on_event.clone();
-        let open_reported = open_reported.clone();
-        let onopen = Closure::<dyn FnMut(Event)>::new(move |_| {
-            open_reported.set(true);
-            on_event.borrow_mut()(WsEvent::Open);
-        });
-        socket.set_onopen(Some(onopen.as_ref().unchecked_ref()));
-        onopen.forget();
-    }
-
-    {
-        let on_event = on_event.clone();
-        let open_reported = open_reported.clone();
-        let onclose = Closure::<dyn FnMut(CloseEvent)>::new(move |_| {
-            open_reported.set(false);
-            on_event.borrow_mut()(WsEvent::Close);
-        });
-        socket.set_onclose(Some(onclose.as_ref().unchecked_ref()));
-        onclose.forget();
-    }
-
-    {
-        let on_event = on_event.clone();
-        let open_reported = open_reported.clone();
-        let onerror = Closure::<dyn FnMut(Event)>::new(move |_| {
-            open_reported.set(false);
-            on_event.borrow_mut()(WsEvent::Error);
-        });
-        socket.set_onerror(Some(onerror.as_ref().unchecked_ref()));
-        onerror.forget();
-    }
-
-    {
-        let on_event = on_event.clone();
-        let open_reported = open_reported.clone();
-        let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
-            if !open_reported.replace(true) {
-                on_event.borrow_mut()(WsEvent::Open);
-            }
-
-            let message = if let Ok(buffer) = event.data().dyn_into::<js_sys::ArrayBuffer>() {
-                let bytes = Uint8Array::new(&buffer).to_vec();
-                match bincode::decode_from_slice::<ServerMessage, _>(
-                    &bytes,
-                    bincode::config::standard(),
-                ) {
-                    Ok((message, _)) => message,
-                    Err(error) => {
-                        web_sys::console::error_1(
-                            &format!("WS message bincode parse error: {error}").into(),
-                        );
-                        return;
-                    }
-                }
-            } else if let Some(text) = event.data().as_string() {
-                match serde_json::from_str::<ServerMessage>(&text) {
-                    Ok(message) => message,
-                    Err(error) => {
-                        let snippet = if text.len() <= 200 {
-                            text
-                        } else {
-                            format!("{}...", &text[..200])
-                        };
-                        web_sys::console::error_1(
-                            &format!("WS message JSON parse error: {error} payload={snippet:?}")
-                                .into(),
-                        );
-                        return;
-                    }
-                }
-            } else {
-                web_sys::console::error_2(
-                    &"WS message data is not a string or arraybuffer".into(),
-                    &event.data(),
-                );
-                return;
-            };
-
-            on_event.borrow_mut()(WsEvent::Message(message));
-        });
-        socket.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
-        onmessage.forget();
-    }
-
-    if should_kick_safari_ws(window) {
-        for delay_ms in [250, 6000] {
-            let socket = socket.clone();
-            let window_cb = window.clone();
-            let onkick = Closure::<dyn FnMut()>::new(move || {
-                if socket.ready_state() == WebSocket::CONNECTING {
-                    let _ = window_cb.fetch_with_str(&ping_url());
-                }
-            });
-            let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-                onkick.as_ref().unchecked_ref(),
-                delay_ms,
-            );
-            onkick.forget();
-        }
-    }
-
-    {
-        let socket = socket.clone();
-        let onbeforeunload = Closure::<dyn FnMut(Event)>::new(move |_| {
-            let _ = socket.close();
-        });
-        window.add_event_listener_with_callback(
-            "beforeunload",
-            onbeforeunload.as_ref().unchecked_ref(),
-        )?;
-        onbeforeunload.forget();
-    }
-
+    sender.attach_listeners()?;
     Ok(sender)
 }
