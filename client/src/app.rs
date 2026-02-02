@@ -256,23 +256,18 @@ fn start_app() -> Result<(), JsValue> {
         show_color_input(&palette_el, &color_input, selected);
     }
 
-    let ws_open = Rc::new(Cell::new(false));
     let ws_sender = connect_ws(&window, {
         let status_el = status_el.clone();
         let status_text = status_text.clone();
-        let ws_open = ws_open.clone();
         let message_state = state.clone();
         move |event: WsEvent| match event {
             WsEvent::Open => {
-                ws_open.set(true);
                 set_status(&status_el, &status_text, "open", "Live connection");
             }
             WsEvent::Close => {
-                ws_open.set(false);
                 set_status(&status_el, &status_text, "closed", "Offline");
             }
             WsEvent::Error => {
-                ws_open.set(false);
                 set_status(&status_el, &status_text, "closed", "Connection error");
             }
             WsEvent::Message(message) => {
@@ -373,10 +368,9 @@ fn start_app() -> Result<(), JsValue> {
 
     {
         let key_sender = ws_sender.clone();
-        let key_ws_open = ws_open.clone();
         let key_state = state.clone();
         let onkeydown = Closure::<dyn FnMut(KeyboardEvent)>::new(move |event: KeyboardEvent| {
-            if !key_ws_open.get() {
+            if !key_sender.is_open() {
                 return;
             }
             let key = event.key();
@@ -675,9 +669,8 @@ fn start_app() -> Result<(), JsValue> {
     {
         let clear_state = state.clone();
         let clear_sender = ws_sender.clone();
-        let clear_ws_open = ws_open.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
-            if !clear_ws_open.get() {
+            if !clear_sender.is_open() {
                 return;
             }
             {
@@ -692,9 +685,8 @@ fn start_app() -> Result<(), JsValue> {
 
     {
         let undo_sender = ws_sender.clone();
-        let undo_ws_open = ws_open.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
-            if !undo_ws_open.get() {
+            if !undo_sender.is_open() {
                 return;
             }
             undo_sender.send(&ClientMessage::Undo);
@@ -705,9 +697,8 @@ fn start_app() -> Result<(), JsValue> {
 
     {
         let redo_sender = ws_sender.clone();
-        let redo_ws_open = ws_open.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
-            if !redo_ws_open.get() {
+            if !redo_sender.is_open() {
                 return;
             }
             redo_sender.send(&ClientMessage::Redo);
@@ -826,9 +817,8 @@ fn start_app() -> Result<(), JsValue> {
         let load_state_onchange = state.clone();
         let load_sender_onchange = ws_sender.clone();
         let load_button_cb = load_button.clone();
-        let load_ws_open = ws_open.clone();
         let onchange = Closure::<dyn FnMut(Event)>::new(move |_| {
-            if !load_ws_open.get() {
+            if !load_sender_onchange.is_open() {
                 return;
             }
             let files = load_file_cb.files();
@@ -849,9 +839,8 @@ fn start_app() -> Result<(), JsValue> {
             let load_state_onload = load_state_onchange.clone();
             let load_sender_onload = load_sender_onchange.clone();
             let load_button_onload = load_button_cb.clone();
-            let load_ws_open = load_ws_open.clone();
             let onload = Closure::<dyn FnMut(ProgressEvent)>::new(move |event: ProgressEvent| {
-                if !load_ws_open.get() {
+                if !load_sender_onload.is_open() {
                     set_load_busy(&load_button_onload, false);
                     return;
                 }
@@ -901,7 +890,6 @@ fn start_app() -> Result<(), JsValue> {
         let down_size = size_input.clone();
         let down_active_draw_pointer = active_draw_pointer.clone();
         let down_active_draw_timestamp = active_draw_timestamp.clone();
-        let down_ws_open = ws_open.clone();
         let ondown = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             if event.button() != 0 {
                 return;
@@ -990,7 +978,7 @@ fn start_app() -> Result<(), JsValue> {
                     state.mode = Mode::Loading(loading);
                 }
                 Mode::Select(mut select) => {
-                    if !down_ws_open.get() {
+                    if !down_sender.is_open() {
                         state.mode = Mode::Select(select);
                         return;
                     }
@@ -1089,7 +1077,7 @@ fn start_app() -> Result<(), JsValue> {
                     let _ = down_canvas.set_pointer_capture(event.pointer_id());
                 }
                 Mode::Erase(_) => {
-                    if !down_ws_open.get() {
+                    if !down_sender.is_open() {
                         state.mode = Mode::Erase(EraseMode::Idle);
                         return;
                     }
@@ -1110,7 +1098,7 @@ fn start_app() -> Result<(), JsValue> {
                     let _ = down_canvas.set_pointer_capture(event.pointer_id());
                 }
                 Mode::Draw(mut draw) => {
-                    if !down_ws_open.get() {
+                    if !down_sender.is_open() {
                         state.mode = Mode::Draw(draw);
                         return;
                     }
@@ -1154,7 +1142,6 @@ fn start_app() -> Result<(), JsValue> {
         let move_schedule_flush = schedule_flush.clone();
         let move_active_draw_pointer = active_draw_pointer.clone();
         let move_active_draw_timestamp = active_draw_timestamp.clone();
-        let move_ws_open = ws_open.clone();
         let onmove = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             for event in coalesced_pointer_events(&event) {
                 if is_touch_event(&event) {
@@ -1230,7 +1217,7 @@ fn start_app() -> Result<(), JsValue> {
                 let mut state = move_state.borrow_mut();
                 match &mut state.mode {
                     Mode::Select(select) => {
-                        if !move_ws_open.get() {
+                        if !move_sender.is_open() {
                             continue;
                         }
                         let world_point =
@@ -1378,7 +1365,7 @@ fn start_app() -> Result<(), JsValue> {
                         }
                     }
                     Mode::Erase(EraseMode::Active { .. }) => {
-                        if !move_ws_open.get() {
+                        if !move_sender.is_open() {
                             continue;
                         }
                         let point = match event_to_point(&move_canvas, &event, pan_x, pan_y, zoom) {
@@ -1403,7 +1390,7 @@ fn start_app() -> Result<(), JsValue> {
                         redraw(&mut state);
                     }
                     Mode::Draw(draw) => {
-                        if !move_ws_open.get() {
+                        if !move_sender.is_open() {
                             continue;
                         }
                         let id = match &draw.mode {

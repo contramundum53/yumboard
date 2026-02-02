@@ -23,8 +23,12 @@ pub struct WsSender {
 }
 
 impl WsSender {
+    pub fn is_open(&self) -> bool {
+        self.socket.ready_state() == WebSocket::OPEN
+    }
+
     pub fn send(&self, message: &ClientMessage) {
-        if self.socket.ready_state() != WebSocket::OPEN {
+        if !self.is_open() {
             return;
         }
         if let Ok(payload) = bincode::encode_to_vec(message, bincode::config::standard()) {
