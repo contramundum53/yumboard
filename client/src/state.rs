@@ -5,7 +5,7 @@ use web_sys::{FileReader, ProgressEvent};
 
 use yumboard_shared::{Point, Stroke, StrokeId};
 
-pub const DEFAULT_PALETTE: [&str; 1] = ["#1f1f1f"];
+pub const DEFAULT_PALETTE: [&str; 3] = ["#1f1f1f", "#d60000", "#0000d0"];
 pub const STROKE_UNIT: f64 = 1.0;
 
 #[derive(Clone, Copy)]
@@ -98,6 +98,11 @@ pub struct PinchState {
     pub zoom: f64,
 }
 
+pub struct DrawPointerState {
+    pub pointer_id: i32,
+    pub last_timestamp: f64,
+}
+
 pub enum Mode {
     Draw(DrawState),
     Erase(EraseMode),
@@ -118,8 +123,7 @@ pub struct State {
     pub mode: Mode,
     pub pending_points: HashMap<StrokeId, Vec<Point>>,
     pub flush_scheduled: bool,
-    pub active_draw_pointer: Option<i32>,
-    pub active_draw_timestamp: f64,
+    pub active_draw_pointer: Option<DrawPointerState>,
     pub touch_points: HashMap<i32, (f64, f64)>,
     pub pinch: Option<PinchState>,
     pub touch_pan: Option<PanMode>,

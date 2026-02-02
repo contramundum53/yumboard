@@ -23,8 +23,8 @@ use crate::palette::{palette_action_from_event, render_palette, PaletteAction};
 use crate::persistence::{build_pdf_html, open_print_window, parse_load_payload, SaveData};
 use crate::render::redraw;
 use crate::state::{
-    DrawMode, DrawState, EraseMode, LoadingState, Mode, PanMode, PinchState, ScaleAxis, SelectMode,
-    SelectState, SelectionHit, State, DEFAULT_PALETTE,
+    DrawMode, DrawPointerState, DrawState, EraseMode, LoadingState, Mode, PanMode, PinchState,
+    ScaleAxis, SelectMode, SelectState, SelectionHit, State, DEFAULT_PALETTE,
 };
 use crate::util::make_id;
 use crate::ws::{connect_ws, WsEvent};
@@ -130,7 +130,6 @@ fn start_app() -> Result<(), JsValue> {
         pending_points: HashMap::new(),
         flush_scheduled: false,
         active_draw_pointer: None,
-        active_draw_timestamp: 0.0,
         touch_points: HashMap::new(),
         pinch: None,
         touch_pan: None,
@@ -419,14 +418,14 @@ fn start_app() -> Result<(), JsValue> {
             }
             match action {
                 PaletteAction::Add => {
-                    let color = ui_callback.color_input.value();
-                    state.palette.push(color.clone());
+                    let color_str = ui_callback.color_input.value();
+                    state.palette.push(color_str.clone());
                     let palette_selected = state.palette.len().saturating_sub(1);
                     state.mode = Mode::Draw(DrawState {
                         mode: DrawMode::Idle,
                         palette_selected,
                     });
-                    ui_callback.color_input.set_value(&color);
+                    ui_callback.color_input.set_value(&color_str);
                     ui_callback.sync_tool_ui(&state, false);
                     render_palette(
                         &ui_callback.document,
@@ -760,7 +759,6 @@ fn start_app() -> Result<(), JsValue> {
                             end_stroke(&mut state, &id);
                             down_sender.send(&ClientMessage::StrokeEnd { id });
                             state.active_draw_pointer = None;
-                            state.active_draw_timestamp = 0.0;
                         }
                     }
                     let _ = ui_callback.canvas.set_pointer_capture(event.pointer_id());
@@ -949,8 +947,10 @@ fn start_app() -> Result<(), JsValue> {
                     let color = parse_color(&ui_callback.color_input.value());
                     let size = sanitize_size(ui_callback.size_input.value_as_number() as f32);
 
-                    state.active_draw_pointer = Some(event.pointer_id());
-                    state.active_draw_timestamp = event.time_stamp();
+                    state.active_draw_pointer = Some(DrawPointerState {
+                        pointer_id: event.pointer_id(),
+                        last_timestamp: event.time_stamp(),
+                    });
 
                     draw.mode = DrawMode::Drawing { id: id.clone() };
                     state.mode = Mode::Draw(draw);
@@ -1239,14 +1239,17 @@ fn start_app() -> Result<(), JsValue> {
                             DrawMode::Drawing { id } => id.clone(),
                             _ => continue,
                         };
-                        if state.active_draw_pointer != Some(event.pointer_id()) {
+                        let Some(active) = state.active_draw_pointer.as_mut() else {
+                            continue;
+                        };
+                        if active.pointer_id != event.pointer_id() {
                             continue;
                         }
                         let timestamp = event.time_stamp();
-                        if timestamp < state.active_draw_timestamp {
+                        if timestamp < active.last_timestamp {
                             continue;
                         }
-                        state.active_draw_timestamp = timestamp;
+                        active.last_timestamp = timestamp;
                         let point =
                             match event_to_point(&ui_callback.canvas, &event, pan_x, pan_y, zoom) {
                                 Some(point) => point,
@@ -1358,12 +1361,15 @@ fn start_app() -> Result<(), JsValue> {
                     ui_callback.set_canvas_mode(&state.mode, false);
                 }
                 Mode::Draw(mut draw) => {
-                    if state.active_draw_pointer != Some(event.pointer_id()) {
+                    let Some(active) = state.active_draw_pointer.as_ref() else {
+                        state.mode = Mode::Draw(draw);
+                        return;
+                    };
+                    if active.pointer_id != event.pointer_id() {
                         state.mode = Mode::Draw(draw);
                         return;
                     }
                     state.active_draw_pointer = None;
-                    state.active_draw_timestamp = 0.0;
                     let id = match &draw.mode {
                         DrawMode::Drawing { id } => id.clone(),
                         _ => {
