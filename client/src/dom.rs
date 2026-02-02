@@ -2,8 +2,8 @@ use js_sys::{Function, Reflect};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
-    Document, Element, HtmlButtonElement, HtmlCanvasElement, HtmlElement, HtmlInputElement,
-    HtmlSpanElement, PointerEvent, Window,
+    CanvasRenderingContext2d, Document, Element, HtmlButtonElement, HtmlCanvasElement, HtmlElement,
+    HtmlInputElement, HtmlSpanElement, PointerEvent, Window,
 };
 
 use yumboard_shared::Point;
@@ -16,6 +16,7 @@ use crate::state::{Mode, State};
 pub struct Ui {
     pub document: Document,
     pub canvas: HtmlCanvasElement,
+    pub ctx: CanvasRenderingContext2d,
     pub color_input: HtmlInputElement,
     pub palette_el: HtmlElement,
     pub size_input: HtmlInputElement,
@@ -40,6 +41,12 @@ pub struct Ui {
 impl Ui {
     pub fn from_document(document: Document) -> Result<Self, JsValue> {
         let canvas: HtmlCanvasElement = get_element(&document, "board")?;
+        let ctx = canvas
+            .get_context("2d")?
+            .ok_or_else(|| JsValue::from_str("Missing canvas context"))?
+            .dyn_into::<CanvasRenderingContext2d>()?;
+        ctx.set_line_cap("round");
+        ctx.set_line_join("round");
         Ok(Self {
             color_input: get_element(&document, "color")?,
             palette_el: get_element(&document, "palette")?,
@@ -66,6 +73,7 @@ impl Ui {
                 .ok_or_else(|| JsValue::from_str("Missing status text"))?,
             document,
             canvas,
+            ctx,
         })
     }
 

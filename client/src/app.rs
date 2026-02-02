@@ -4,10 +4,7 @@ use std::rc::Rc;
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{
-    CanvasRenderingContext2d, Event, FileReader, HtmlAnchorElement, KeyboardEvent, PointerEvent,
-    ProgressEvent,
-};
+use web_sys::{Event, FileReader, HtmlAnchorElement, KeyboardEvent, PointerEvent, ProgressEvent};
 
 use yumboard_shared::{ClientMessage, ServerMessage, Stroke, TransformOp};
 
@@ -113,13 +110,7 @@ fn start_app() -> Result<(), JsValue> {
         .ok_or_else(|| JsValue::from_str("Missing document"))?;
     let ui = Rc::new(Ui::from_document(document)?);
 
-    let ctx = ui
-        .canvas
-        .get_context("2d")?
-        .ok_or_else(|| JsValue::from_str("Missing canvas context"))?
-        .dyn_into::<CanvasRenderingContext2d>()?;
-    ctx.set_line_cap("round");
-    ctx.set_line_join("round");
+    let ctx = ui.ctx.clone();
 
     let state = Rc::new(RefCell::new(State {
         strokes: Vec::new(),
