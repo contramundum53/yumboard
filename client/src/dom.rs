@@ -10,7 +10,6 @@ use yumboard_shared::Point;
 
 use crate::geometry;
 use crate::geometry::normalize_point;
-use crate::render::redraw;
 use crate::state::{Mode, State};
 
 pub struct Ui {
@@ -252,7 +251,6 @@ pub fn resize_canvas(
         state.pan_x += (state.board_width - last_board_width) / 2.0;
         state.pan_y += (state.board_height - last_board_height) / 2.0;
     }
-    redraw(ctx, state);
 }
 
 pub fn event_to_point(
