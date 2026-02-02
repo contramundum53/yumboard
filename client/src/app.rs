@@ -349,13 +349,6 @@ fn start_app() -> Result<(), JsValue> {
         }
     })?;
 
-    let schedule_flush = {
-        let window = window.clone();
-        let sender = ws_sender.clone();
-        let state = state.clone();
-        move || schedule_flush(&window, &sender, &state)
-    };
-
     {
         let resize_state = state.clone();
         let window_cb = window.clone();
@@ -1161,7 +1154,7 @@ fn start_app() -> Result<(), JsValue> {
         let move_state = state.clone();
         let move_sender = ws_sender.clone();
         let move_canvas = canvas.clone();
-        let move_schedule_flush = schedule_flush.clone();
+        let move_window = window.clone();
         let move_ctx = ctx.clone();
         let onmove = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             for event in coalesced_pointer_events(&event) {
@@ -1440,7 +1433,7 @@ fn start_app() -> Result<(), JsValue> {
                             };
                             if should_schedule {
                                 drop(state);
-                                move_schedule_flush();
+                                schedule_flush(&move_window, &move_sender, &move_state);
                             }
                         }
                     }
