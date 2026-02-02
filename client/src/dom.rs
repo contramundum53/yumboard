@@ -88,10 +88,10 @@ impl Ui {
         let is_pan = matches!(state.mode, Mode::Pan(_));
         let is_erase = matches!(state.mode, Mode::Erase(_));
         let is_select = matches!(state.mode, Mode::Select(_));
-        set_tool_button(&self.pan_button, is_pan);
-        set_tool_button(&self.eraser_button, is_erase);
-        set_tool_button(&self.lasso_button, is_select);
-        set_canvas_mode(&self.canvas, &state.mode, dragging);
+        self.set_tool_button(&self.pan_button, is_pan);
+        self.set_tool_button(&self.eraser_button, is_erase);
+        self.set_tool_button(&self.lasso_button, is_select);
+        self.set_canvas_mode(&state.mode, dragging);
     }
 
     pub fn hide_color_input(&self) {
@@ -130,6 +130,30 @@ impl Ui {
         let _ = style.set_property("height", &format!("{}px", rect.height()));
         self.color_input.set_class_name("hidden-color active");
     }
+
+    pub fn set_tool_button(&self, button: &HtmlButtonElement, active: bool) {
+        let pressed = if active { "true" } else { "false" };
+        let _ = button.set_attribute("aria-pressed", pressed);
+    }
+
+    pub fn set_canvas_mode(&self, mode: &Mode, dragging: bool) {
+        let cursor = match mode {
+            Mode::Pan(_) => {
+                if dragging {
+                    "grabbing"
+                } else {
+                    "grab"
+                }
+            }
+            Mode::Erase(_) => "cell",
+            Mode::Draw(_) => "crosshair",
+            Mode::Select(_) => "default",
+            Mode::Loading(_) => "progress",
+        };
+        if let Ok(element) = self.canvas.clone().dyn_into::<HtmlElement>() {
+            let _ = element.style().set_property("cursor", cursor);
+        }
+    }
 }
 
 pub fn get_element<T: JsCast>(document: &Document, id: &str) -> Result<T, JsValue> {
@@ -139,30 +163,6 @@ pub fn get_element<T: JsCast>(document: &Document, id: &str) -> Result<T, JsValu
     element
         .dyn_into::<T>()
         .map_err(|_| JsValue::from_str(&format!("Invalid element type: {id}")))
-}
-
-pub fn set_tool_button(button: &web_sys::HtmlButtonElement, active: bool) {
-    let pressed = if active { "true" } else { "false" };
-    let _ = button.set_attribute("aria-pressed", pressed);
-}
-
-pub fn set_canvas_mode(canvas: &HtmlCanvasElement, mode: &Mode, dragging: bool) {
-    let cursor = match mode {
-        Mode::Pan(_) => {
-            if dragging {
-                "grabbing"
-            } else {
-                "grab"
-            }
-        }
-        Mode::Erase(_) => "cell",
-        Mode::Draw(_) => "crosshair",
-        Mode::Select(_) => "default",
-        Mode::Loading(_) => "progress",
-    };
-    if let Ok(element) = canvas.clone().dyn_into::<HtmlElement>() {
-        let _ = element.style().set_property("cursor", cursor);
-    }
 }
 
 pub fn coalesced_pointer_events(event: &PointerEvent) -> Vec<PointerEvent> {

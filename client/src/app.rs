@@ -16,10 +16,7 @@ use crate::actions::{
     erase_hits_at_point, finalize_lasso_selection, move_stroke, parse_color, remove_stroke,
     replace_stroke_local, restore_stroke, sanitize_size, start_stroke,
 };
-use crate::dom::{
-    coalesced_pointer_events, event_to_point, is_touch_event, resize_canvas, set_canvas_mode,
-    set_tool_button, Ui,
-};
+use crate::dom::{coalesced_pointer_events, event_to_point, is_touch_event, resize_canvas, Ui};
 use crate::geometry;
 use crate::geometry::{
     angle_between, apply_rotation, apply_scale_xy, apply_translation, clamp_scale,
@@ -151,10 +148,10 @@ fn start_app() -> Result<(), JsValue> {
 
     ui.update_size_label();
     ui.set_status("connecting", "Connecting...");
-    set_tool_button(&ui.lasso_button, false);
-    set_tool_button(&ui.eraser_button, false);
-    set_tool_button(&ui.pan_button, false);
-    set_canvas_mode(&ui.canvas, &state.borrow().mode, false);
+    ui.set_tool_button(&ui.lasso_button, false);
+    ui.set_tool_button(&ui.eraser_button, false);
+    ui.set_tool_button(&ui.pan_button, false);
+    ui.set_canvas_mode(&state.borrow().mode, false);
     {
         let state = state.borrow();
         let selected = palette_selected(&state.mode);
@@ -773,7 +770,7 @@ fn start_app() -> Result<(), JsValue> {
                         origin_x: state.pan_x,
                         origin_y: state.pan_y,
                     });
-                    set_canvas_mode(&ui_callback.canvas, &state.mode, true);
+                    ui_callback.set_canvas_mode(&state.mode, true);
                     let _ = ui_callback.canvas.set_pointer_capture(event.pointer_id());
                     return;
                 }
@@ -907,7 +904,7 @@ fn start_app() -> Result<(), JsValue> {
                         origin_x: pan_x,
                         origin_y: pan_y,
                     });
-                    set_canvas_mode(&ui_callback.canvas, &state.mode, true);
+                    ui_callback.set_canvas_mode(&state.mode, true);
                     let _ = ui_callback.canvas.set_pointer_capture(event.pointer_id());
                 }
                 Mode::Erase(_) => {
@@ -1195,7 +1192,7 @@ fn start_app() -> Result<(), JsValue> {
                             }
                             SelectMode::Idle => {
                                 if hit.is_some() {
-                                    set_canvas_mode(&ui_callback.canvas, &state.mode, false);
+                                    ui_callback.set_canvas_mode(&state.mode, false);
                                 }
                             }
                         }
@@ -1357,7 +1354,7 @@ fn start_app() -> Result<(), JsValue> {
                 }
                 Mode::Pan(PanMode::Active { .. }) => {
                     state.mode = Mode::Pan(PanMode::Idle);
-                    set_canvas_mode(&ui_callback.canvas, &state.mode, false);
+                    ui_callback.set_canvas_mode(&state.mode, false);
                 }
                 Mode::Draw(mut draw) => {
                     if state.active_draw_pointer != Some(event.pointer_id()) {
