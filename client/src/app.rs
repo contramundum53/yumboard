@@ -23,8 +23,8 @@ use crate::palette::{palette_action_from_event, render_palette, PaletteAction};
 use crate::persistence::{build_pdf_html, open_print_window, parse_load_payload, SaveData};
 use crate::render::redraw;
 use crate::state::{
-    DrawMode, DrawPointerState, DrawState, EraseMode, LoadingState, Mode, PanMode, PinchState,
-    ScaleAxis, SelectMode, SelectState, SelectionHit, State, DEFAULT_PALETTE,
+    DrawMode, DrawPointerState, DrawState, EraseMode, InputActivity, LoadingState, Mode, PanMode,
+    PinchState, ScaleAxis, SelectMode, SelectState, SelectionHit, State, DEFAULT_PALETTE,
 };
 use crate::util::make_id;
 use crate::ws::{connect_ws, WsEvent};
@@ -129,10 +129,8 @@ fn start_app() -> Result<(), JsValue> {
         }),
         pending_points: HashMap::new(),
         flush_scheduled: false,
-        active_draw_pointer: None,
+        input_activity: InputActivity::None,
         touch_points: HashMap::new(),
-        pinch: None,
-        touch_pan: None,
     }));
 
     ui.update_size_label();
@@ -746,7 +744,7 @@ fn start_app() -> Result<(), JsValue> {
                     let distance = pinch_distance(&points).max(0.001);
                     let world_center_x = (center_x - state.pan_x) / state.zoom;
                     let world_center_y = (center_y - state.pan_y) / state.zoom;
-                    state.pinch = Some(PinchState {
+                    state.input_activity = InputActivity::Pinch(PinchState {
                         world_center_x,
                         world_center_y,
                         distance,
@@ -758,14 +756,13 @@ fn start_app() -> Result<(), JsValue> {
                             draw.mode = DrawMode::Idle;
                             end_stroke(&mut state, &id);
                             down_sender.send(&ClientMessage::StrokeEnd { id });
-                            state.active_draw_pointer = None;
                         }
                     }
                     let _ = ui_callback.canvas.set_pointer_capture(event.pointer_id());
                     return;
                 }
                 if state.touch_points.len() == 1 {
-                    state.touch_pan = Some(PanMode::Active {
+                    state.input_activity = InputActivity::Pan(PanMode::Active {
                         start_x: event.client_x() as f64,
                         start_y: event.client_y() as f64,
                         origin_x: state.pan_x,
@@ -947,7 +944,7 @@ fn start_app() -> Result<(), JsValue> {
                     let color = parse_color(&ui_callback.color_input.value());
                     let size = sanitize_size(ui_callback.size_input.value_as_number() as f32);
 
-                    state.active_draw_pointer = Some(DrawPointerState {
+                    state.input_activity = InputActivity::Draw(DrawPointerState {
                         pointer_id: event.pointer_id(),
                         last_timestamp: event.time_stamp(),
                     });
@@ -991,7 +988,7 @@ fn start_app() -> Result<(), JsValue> {
                         event.pointer_id(),
                         (event.client_x() as f64, event.client_y() as f64),
                     );
-                    if let Some(pinch) = state.pinch.as_ref() {
+                    if let InputActivity::Pinch(pinch) = &state.input_activity {
                         if state.touch_points.len() >= 2 {
                             let start_distance = pinch.distance;
                             let pinch_zoom = pinch.zoom;
@@ -1014,15 +1011,15 @@ fn start_app() -> Result<(), JsValue> {
                             redraw(&ui_callback.ctx, &mut state);
                             continue;
                         }
-                        state.pinch = None;
+                        state.input_activity = InputActivity::None;
                     }
                     if state.touch_points.len() == 1 {
-                        if let Some(PanMode::Active {
+                        if let InputActivity::Pan(PanMode::Active {
                             start_x,
                             start_y,
                             origin_x,
                             origin_y,
-                        }) = state.touch_pan
+                        }) = state.input_activity
                         {
                             let next_pan_x = origin_x + (event.client_x() as f64 - start_x);
                             let next_pan_y = origin_y + (event.client_y() as f64 - start_y);
@@ -1239,7 +1236,7 @@ fn start_app() -> Result<(), JsValue> {
                             DrawMode::Drawing { id } => id.clone(),
                             _ => continue,
                         };
-                        let Some(active) = state.active_draw_pointer.as_mut() else {
+                        let InputActivity::Draw(active) = &mut state.input_activity else {
                             continue;
                         };
                         if active.pointer_id != event.pointer_id() {
@@ -1291,10 +1288,14 @@ fn start_app() -> Result<(), JsValue> {
             if is_touch_event(&event) {
                 state.touch_points.remove(&event.pointer_id());
                 if state.touch_points.len() < 2 {
-                    state.pinch = None;
+                    if matches!(state.input_activity, InputActivity::Pinch(_)) {
+                        state.input_activity = InputActivity::None;
+                    }
                 }
                 if state.touch_points.is_empty() {
-                    state.touch_pan = None;
+                    if matches!(state.input_activity, InputActivity::Pan(_)) {
+                        state.input_activity = InputActivity::None;
+                    }
                 }
                 event.prevent_default();
                 if ui_callback.canvas.has_pointer_capture(event.pointer_id()) {
@@ -1361,7 +1362,7 @@ fn start_app() -> Result<(), JsValue> {
                     ui_callback.set_canvas_mode(&state.mode, false);
                 }
                 Mode::Draw(mut draw) => {
-                    let Some(active) = state.active_draw_pointer.as_ref() else {
+                    let InputActivity::Draw(active) = &state.input_activity else {
                         state.mode = Mode::Draw(draw);
                         return;
                     };
@@ -1369,7 +1370,7 @@ fn start_app() -> Result<(), JsValue> {
                         state.mode = Mode::Draw(draw);
                         return;
                     }
-                    state.active_draw_pointer = None;
+                    state.input_activity = InputActivity::None;
                     let id = match &draw.mode {
                         DrawMode::Drawing { id } => id.clone(),
                         _ => {

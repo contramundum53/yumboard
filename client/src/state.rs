@@ -103,6 +103,13 @@ pub struct DrawPointerState {
     pub last_timestamp: f64,
 }
 
+pub enum InputActivity {
+    None,
+    Draw(DrawPointerState),
+    Pinch(PinchState),
+    Pan(PanMode),
+}
+
 pub enum Mode {
     Draw(DrawState),
     Erase(EraseMode),
@@ -123,10 +130,8 @@ pub struct State {
     pub mode: Mode,
     pub pending_points: HashMap<StrokeId, Vec<Point>>,
     pub flush_scheduled: bool,
-    pub active_draw_pointer: Option<DrawPointerState>,
+    pub input_activity: InputActivity,
     pub touch_points: HashMap<i32, (f64, f64)>,
-    pub pinch: Option<PinchState>,
-    pub touch_pan: Option<PanMode>,
 }
 
 impl State {}
