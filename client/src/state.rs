@@ -130,6 +130,8 @@ pub struct State {
     pub mode: Mode,
     pub pending_points: HashMap<StrokeId, Vec<Point>>,
     pub flush_scheduled: bool,
+    pub redraw_scheduled: bool,
+    pub ws_offline_prompted: bool,
     pub input_activity: InputActivity,
     pub touch_points: HashMap<i32, (f64, f64)>,
 }

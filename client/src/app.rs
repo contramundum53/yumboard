@@ -1,4 +1,4 @@
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
@@ -57,21 +57,19 @@ fn schedule_flush(
     let _ = window.request_animation_frame(cb.unchecked_ref());
 }
 
-fn schedule_redraw(
-    window: &web_sys::Window,
-    ui: &Rc<Ui>,
-    state: &Rc<RefCell<State>>,
-    redraw_scheduled: &Rc<Cell<bool>>,
-) {
-    if redraw_scheduled.replace(true) {
-        return;
+fn schedule_redraw(window: &web_sys::Window, ui: &Rc<Ui>, state: &Rc<RefCell<State>>) {
+    {
+        let mut state = state.borrow_mut();
+        if state.redraw_scheduled {
+            return;
+        }
+        state.redraw_scheduled = true;
     }
     let state = state.clone();
     let ui = ui.clone();
-    let redraw_scheduled = redraw_scheduled.clone();
     let cb = Closure::once_into_js(move |_: f64| {
-        redraw_scheduled.set(false);
         let mut state = state.borrow_mut();
+        state.redraw_scheduled = false;
         redraw(&ui.ctx, &mut state);
     });
     let _ = window.request_animation_frame(cb.unchecked_ref());
@@ -149,6 +147,8 @@ fn start_app() -> Result<(), JsValue> {
         }),
         pending_points: HashMap::new(),
         flush_scheduled: false,
+        redraw_scheduled: false,
+        ws_offline_prompted: false,
         input_activity: InputActivity::None,
         touch_points: HashMap::new(),
     }));
@@ -171,29 +171,30 @@ fn start_app() -> Result<(), JsValue> {
         ui.show_color_input(selected);
     }
 
-    let ws_offline_prompted = Rc::new(std::cell::Cell::new(false));
-    let redraw_scheduled = Rc::new(Cell::new(false));
     let ws_sender = connect_ws(&window, {
         let ui = ui.clone();
         let message_state = state.clone();
         let window = window.clone();
-        let redraw_scheduled = redraw_scheduled.clone();
-        let ws_offline_prompted = ws_offline_prompted.clone();
         move |event: WsEvent| match event {
             WsEvent::Open => {
                 ui.set_status("open", "Live connection");
                 ui.hide_reload_banner();
-                ws_offline_prompted.set(false);
+                let mut state = message_state.borrow_mut();
+                state.ws_offline_prompted = false;
             }
             WsEvent::Close => {
                 ui.set_status("closed", "Offline");
-                if !ws_offline_prompted.replace(true) {
+                let mut state = message_state.borrow_mut();
+                if !state.ws_offline_prompted {
+                    state.ws_offline_prompted = true;
                     ui.show_reload_banner("Connection lost. Please reload the page.");
                 }
             }
             WsEvent::Error => {
                 ui.set_status("closed", "Connection error");
-                if !ws_offline_prompted.replace(true) {
+                let mut state = message_state.borrow_mut();
+                if !state.ws_offline_prompted {
+                    state.ws_offline_prompted = true;
                     ui.show_reload_banner("Connection error. Please reload the page.");
                 }
             }
@@ -227,14 +228,14 @@ fn start_app() -> Result<(), JsValue> {
                     }
                     ServerMessage::StrokeRemove { id } => {
                         remove_stroke(&mut state, &id);
-                        schedule_redraw(&window, &ui, &message_state, &redraw_scheduled);
+                        schedule_redraw(&window, &ui, &message_state);
                     }
                     ServerMessage::StrokeRestore { stroke } => {
                         restore_stroke(&mut state, &ui.ctx, stroke);
                     }
                     ServerMessage::StrokeReplace { stroke } => {
                         replace_stroke_local(&mut state, stroke);
-                        schedule_redraw(&window, &ui, &message_state, &redraw_scheduled);
+                        schedule_redraw(&window, &ui, &message_state);
                     }
                     ServerMessage::TransformUpdate { ids, op } => {
                         apply_transform_operation(&mut state, &ui.ctx, &ids, &op);
@@ -247,9 +248,9 @@ fn start_app() -> Result<(), JsValue> {
     {
         let ws_sender = ws_sender.clone();
         let ui_callback = ui.clone();
-        let ws_offline_prompted = ws_offline_prompted.clone();
+        let reconnect_state = state.clone();
         let onclick = Closure::<dyn FnMut()>::new(move || {
-            ws_offline_prompted.set(false);
+            reconnect_state.borrow_mut().ws_offline_prompted = false;
             ui_callback.hide_reload_banner();
             if ws_sender.reconnect().is_err() {
                 ui_callback.show_reload_banner("Connection error. Please reload the page.");
@@ -264,11 +265,10 @@ fn start_app() -> Result<(), JsValue> {
         let resize_state = state.clone();
         let window_cb = window.clone();
         let ui = ui.clone();
-        let redraw_scheduled = redraw_scheduled.clone();
         let onresize = Closure::<dyn FnMut()>::new(move || {
             let mut state = resize_state.borrow_mut();
             resize_canvas(&window_cb, &ui.canvas, &ui.ctx, &mut state);
-            schedule_redraw(&window_cb, &ui, &resize_state, &redraw_scheduled);
+            schedule_redraw(&window_cb, &ui, &resize_state);
         });
         window.add_event_listener_with_callback("resize", onresize.as_ref().unchecked_ref())?;
         onresize.forget();
@@ -279,7 +279,6 @@ fn start_app() -> Result<(), JsValue> {
         let key_state = state.clone();
         let ui_callback = ui.clone();
         let window_key = window.clone();
-        let redraw_scheduled = redraw_scheduled.clone();
         let onkeydown = Closure::<dyn FnMut(KeyboardEvent)>::new(move |event: KeyboardEvent| {
             if !key_sender.is_open() {
                 return;
@@ -304,7 +303,7 @@ fn start_app() -> Result<(), JsValue> {
                             select.selected_ids.clear();
                             select.mode = SelectMode::Idle;
                         }
-                        schedule_redraw(&window_key, &ui_callback, &key_state, &redraw_scheduled);
+                        schedule_redraw(&window_key, &ui_callback, &key_state);
                         ids
                     };
                     key_sender.send(&ClientMessage::Remove { ids });
@@ -335,7 +334,7 @@ fn start_app() -> Result<(), JsValue> {
         let mut state = state.borrow_mut();
         resize_canvas(&window, &ui.canvas, &ui.ctx, &mut state);
     }
-    schedule_redraw(&window, &ui, &state, &redraw_scheduled);
+    schedule_redraw(&window, &ui, &state);
 
     {
         let ui_callback = ui.clone();
@@ -423,7 +422,6 @@ fn start_app() -> Result<(), JsValue> {
         let home_state = state.clone();
         let ui_callback = ui.clone();
         let window = window.clone();
-        let redraw_scheduled = redraw_scheduled.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let mut state = home_state.borrow_mut();
             if matches!(state.mode, Mode::Loading(_)) {
@@ -433,7 +431,7 @@ fn start_app() -> Result<(), JsValue> {
             state.zoom = zoom;
             state.pan_x = pan_x;
             state.pan_y = pan_y;
-            schedule_redraw(&window, &ui_callback, &home_state, &redraw_scheduled);
+            schedule_redraw(&window, &ui_callback, &home_state);
         });
         ui.home_button
             .add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
@@ -760,7 +758,6 @@ fn start_app() -> Result<(), JsValue> {
         let down_sender = ws_sender.clone();
         let ui_callback = ui.clone();
         let window = window.clone();
-        let redraw_scheduled = redraw_scheduled.clone();
         let ondown = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             if event.button() != 0 {
                 return;
@@ -873,12 +870,7 @@ fn start_app() -> Result<(), JsValue> {
                                 select.selected_ids.clear();
                                 select.mode = SelectMode::Idle;
                                 state.mode = Mode::Select(select);
-                                schedule_redraw(
-                                    &window,
-                                    &ui_callback,
-                                    &down_state,
-                                    &redraw_scheduled,
-                                );
+                                schedule_redraw(&window, &ui_callback, &down_state);
                                 down_sender.send(&ClientMessage::Remove { ids });
                                 let _ = ui_callback.canvas.set_pointer_capture(event.pointer_id());
                                 return;
@@ -937,7 +929,7 @@ fn start_app() -> Result<(), JsValue> {
                         points: vec![world_point],
                     };
                     state.mode = Mode::Select(select);
-                    schedule_redraw(&window, &ui_callback, &down_state, &redraw_scheduled);
+                    schedule_redraw(&window, &ui_callback, &down_state);
                     let _ = ui_callback.canvas.set_pointer_capture(event.pointer_id());
                 }
                 Mode::Pan(_) => {
@@ -1026,7 +1018,6 @@ fn start_app() -> Result<(), JsValue> {
         let ui_callback = ui.clone();
         let move_window = window.clone();
         let window = window.clone();
-        let redraw_scheduled = redraw_scheduled.clone();
         let onmove = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             for event in coalesced_pointer_events(&event) {
                 if is_touch_event(&event) {
@@ -1055,7 +1046,7 @@ fn start_app() -> Result<(), JsValue> {
                             state.zoom = next_zoom;
                             state.pan_x = center_x - world_center_x * next_zoom;
                             state.pan_y = center_y - world_center_y * next_zoom;
-                            schedule_redraw(&window, &ui_callback, &move_state, &redraw_scheduled);
+                            schedule_redraw(&window, &ui_callback, &move_state);
                             continue;
                         }
                         state.input_activity = InputActivity::None;
@@ -1072,7 +1063,7 @@ fn start_app() -> Result<(), JsValue> {
                             let next_pan_y = origin_y + (event.client_y() as f64 - start_y);
                             state.pan_x = next_pan_x;
                             state.pan_y = next_pan_y;
-                            schedule_redraw(&window, &ui_callback, &move_state, &redraw_scheduled);
+                            schedule_redraw(&window, &ui_callback, &move_state);
                             continue;
                         }
                     }
@@ -1116,12 +1107,7 @@ fn start_app() -> Result<(), JsValue> {
                         match &mut select.mode {
                             SelectMode::Lasso { points } => {
                                 points.push(world_point);
-                                schedule_redraw(
-                                    &window,
-                                    &ui_callback,
-                                    &move_state,
-                                    &redraw_scheduled,
-                                );
+                                schedule_redraw(&window, &ui_callback, &move_state);
                             }
                             SelectMode::Move {
                                 start,
@@ -1278,7 +1264,7 @@ fn start_app() -> Result<(), JsValue> {
                         let next_pan_y = *origin_y + (event.client_y() as f64 - *start_y);
                         state.pan_x = next_pan_x;
                         state.pan_y = next_pan_y;
-                        schedule_redraw(&window, &ui_callback, &move_state, &redraw_scheduled);
+                        schedule_redraw(&window, &ui_callback, &move_state);
                     }
                     Mode::Draw(draw) => {
                         if !move_sender.is_open() {
@@ -1336,7 +1322,6 @@ fn start_app() -> Result<(), JsValue> {
         let stop_sender = ws_sender.clone();
         let ui_callback = ui.clone();
         let window = window.clone();
-        let redraw_scheduled = redraw_scheduled.clone();
         let onstop = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
             let mut state = stop_state.borrow_mut();
             if is_touch_event(&event) {
@@ -1400,7 +1385,7 @@ fn start_app() -> Result<(), JsValue> {
                     if let Mode::Select(select) = &mut state.mode {
                         select.mode = SelectMode::Idle;
                     }
-                    schedule_redraw(&window, &ui_callback, &stop_state, &redraw_scheduled);
+                    schedule_redraw(&window, &ui_callback, &stop_state);
                     drop(state);
                     if let Some(ids) = end_ids {
                         if !ids.is_empty() {
@@ -1473,7 +1458,6 @@ fn start_app() -> Result<(), JsValue> {
         let zoom_state = state.clone();
         let ui_callback = ui.clone();
         let window = window.clone();
-        let redraw_scheduled = redraw_scheduled.clone();
         let onwheel = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
             let wheel_event = match event.dyn_into::<web_sys::WheelEvent>() {
                 Ok(event) => event,
@@ -1500,7 +1484,7 @@ fn start_app() -> Result<(), JsValue> {
                 state.zoom = next_zoom;
                 state.pan_x = next_pan_x;
                 state.pan_y = next_pan_y;
-                schedule_redraw(&window, &ui_callback, &zoom_state, &redraw_scheduled);
+                schedule_redraw(&window, &ui_callback, &zoom_state);
             }
         });
         ui.canvas
