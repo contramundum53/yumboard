@@ -47,7 +47,7 @@ pub fn render_palette(
                 let _ = remove_button.set_attribute("aria-label", "Remove palette color");
                 let _ = remove_button.set_attribute("class", "swatch-remove");
                 remove_button.set_inner_html(
-                    "<svg viewBox=\"0 0 20 20\" aria-hidden=\"true\"><path d=\"M6 6l8 8M14 6l-8 8\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\"/></svg>",
+                    "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M7 7l10 10M17 7l-10 10\" stroke=\"currentColor\" stroke-width=\"2.8\" stroke-linecap=\"round\"/></svg>",
                 );
                 let _ = wrapper.append_child(&remove_button);
             }

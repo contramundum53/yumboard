@@ -88,6 +88,15 @@ fn palette_selected(mode: &Mode) -> Option<usize> {
     }
 }
 
+fn set_palette_remove_mode(ui: &Ui, state: &mut State, enabled: bool) {
+    state.palette_remove_mode = enabled;
+    if enabled {
+        let _ = ui.palette_el.set_attribute("data-remove", "true");
+    } else {
+        let _ = ui.palette_el.remove_attribute("data-remove");
+    }
+}
+
 fn take_loading_previous(state: &mut State) -> Option<Mode> {
     let placeholder = Mode::Pan(PanMode::Idle);
     match std::mem::replace(&mut state.mode, placeholder) {
@@ -161,6 +170,7 @@ fn start_app() -> Result<(), JsValue> {
         ws_offline_prompted: false,
         input_activity: InputActivity::None,
         touch_points: HashMap::new(),
+        palette_remove_mode: false,
     }));
 
     ui.update_size_label();
@@ -460,8 +470,6 @@ fn start_app() -> Result<(), JsValue> {
     {
         let palette_state = state.clone();
         let ui_callback = ui.clone();
-        let palette_remove_mode = Rc::new(Cell::new(false));
-        let palette_remove_mode_click = palette_remove_mode.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
             let action = match palette_action_from_event(&event) {
                 Some(action) => action,
@@ -471,12 +479,11 @@ fn start_app() -> Result<(), JsValue> {
             if matches!(state.mode, Mode::Loading(_)) {
                 return;
             }
-            if palette_remove_mode_click.get() {
+            if state.palette_remove_mode {
                 match action {
                     PaletteAction::Remove(_) => {}
                     _ => {
-                        let _ = ui_callback.palette_el.remove_attribute("data-remove");
-                        palette_remove_mode_click.set(false);
+                        set_palette_remove_mode(&ui_callback, &mut state, false);
                         return;
                     }
                 }
@@ -555,26 +562,22 @@ fn start_app() -> Result<(), JsValue> {
                 }
             }
 
-            if palette_remove_mode_click.get() {
-                let _ = ui_callback.palette_el.remove_attribute("data-remove");
-                palette_remove_mode_click.set(false);
+            if state.palette_remove_mode {
+                set_palette_remove_mode(&ui_callback, &mut state, false);
             }
         });
         ui.palette_el
             .add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
 
-        let remove_mode_ctx = palette_remove_mode.clone();
+        let remove_state = state.clone();
         let ui_ctx = ui.clone();
         let oncontextmenu = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
             event.prevent_default();
-            let next = !remove_mode_ctx.get();
-            remove_mode_ctx.set(next);
-            if next {
-                let _ = ui_ctx.palette_el.set_attribute("data-remove", "true");
-            } else {
-                let _ = ui_ctx.palette_el.remove_attribute("data-remove");
-            }
+            event.stop_propagation();
+            let mut state = remove_state.borrow_mut();
+            let next = !state.palette_remove_mode;
+            set_palette_remove_mode(&ui_ctx, &mut state, next);
         });
         ui.palette_el.add_event_listener_with_callback(
             "contextmenu",
@@ -582,7 +585,22 @@ fn start_app() -> Result<(), JsValue> {
         )?;
         oncontextmenu.forget();
 
-        let press_state = palette_remove_mode.clone();
+        let remove_state = state.clone();
+        let ui_ctx = ui.clone();
+        let oncontextmenu_color = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
+            event.prevent_default();
+            event.stop_propagation();
+            let mut state = remove_state.borrow_mut();
+            let next = !state.palette_remove_mode;
+            set_palette_remove_mode(&ui_ctx, &mut state, next);
+        });
+        ui.color_input.add_event_listener_with_callback(
+            "contextmenu",
+            oncontextmenu_color.as_ref().unchecked_ref(),
+        )?;
+        oncontextmenu_color.forget();
+
+        let press_state = state.clone();
         let ui_press = ui.clone();
         let window_press = window.clone();
         let long_press_timer = Rc::new(Cell::new(None));
@@ -591,15 +609,15 @@ fn start_app() -> Result<(), JsValue> {
             if event.button() != 0 {
                 return;
             }
-            if press_state.get() {
+            if press_state.borrow().palette_remove_mode {
                 return;
             }
             let timer = {
                 let ui_press = ui_press.clone();
                 let press_state = press_state.clone();
                 Closure::once_into_js(move || {
-                    press_state.set(true);
-                    let _ = ui_press.palette_el.set_attribute("data-remove", "true");
+                    let mut state = press_state.borrow_mut();
+                    set_palette_remove_mode(&ui_press, &mut state, true);
                 })
             };
             let Ok(id) = window_press.set_timeout_with_callback_and_timeout_and_arguments_0(
@@ -637,12 +655,9 @@ fn start_app() -> Result<(), JsValue> {
         )?;
         onpointerup.forget();
 
-        let remove_mode_doc = palette_remove_mode.clone();
+        let remove_mode_doc = state.clone();
         let ui_doc = ui.clone();
         let ondocclick = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
-            if !remove_mode_doc.get() {
-                return;
-            }
             let target = event
                 .target()
                 .and_then(|target| target.dyn_into::<web_sys::Element>().ok());
@@ -650,9 +665,12 @@ fn start_app() -> Result<(), JsValue> {
                 .as_ref()
                 .and_then(|el| el.closest("[data-action=\"remove\"]").ok().flatten())
                 .is_some();
+            let mut state = remove_mode_doc.borrow_mut();
+            if !state.palette_remove_mode {
+                return;
+            }
             if !is_remove_button {
-                let _ = ui_doc.palette_el.remove_attribute("data-remove");
-                remove_mode_doc.set(false);
+                set_palette_remove_mode(&ui_doc, &mut state, false);
             }
         });
         ui.document

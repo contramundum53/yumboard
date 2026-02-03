@@ -134,6 +134,7 @@ pub struct State {
     pub ws_offline_prompted: bool,
     pub input_activity: InputActivity,
     pub touch_points: HashMap<i32, (f64, f64)>,
+    pub palette_remove_mode: bool,
 }
 
 impl State {}

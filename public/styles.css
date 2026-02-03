@@ -155,10 +155,10 @@ body {
 
 .swatch-remove {
   position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 16px;
-  height: 16px;
+  top: -7px;
+  right: -7px;
+  width: 20px;
+  height: 20px;
   border-radius: 999px;
   border: 1px solid #b22a2a;
   background: #e03b3b;
@@ -174,8 +174,8 @@ body {
 }
 
 .swatch-remove svg {
-  width: 10px;
-  height: 10px;
+  width: 14px;
+  height: 14px;
 }
 
 .palette[data-remove="true"] .swatch-remove {
