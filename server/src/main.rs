@@ -40,6 +40,10 @@ struct Args {
     #[arg(long)]
     s3_endpoint: Option<String>,
 
+    // Use path-style addressing for S3 (required for some S3-compatible services)
+    #[arg(long, default_value_t = false)]
+    s3_path_style: bool,
+
     // Directory to serve static files from
     #[arg(long)]
     public_dir: Option<PathBuf>,
@@ -130,12 +134,12 @@ fn parse_s3_url(value: &str) -> Option<(String, String)> {
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
-    let use_s3 = args.aws_access_key_id.is_some()
-        || args.aws_secret_access_key.is_some()
-        || args.s3_endpoint.is_some();
-    if args.aws_access_key_id.is_some() ^ args.aws_secret_access_key.is_some() {
-        panic!("Both --aws-access-key-id and --aws-secret-access-key must be provided together.");
-    }
+
+    let use_s3 = args
+        .sessions_dir
+        .as_deref()
+        .map_or(false, |dir| dir.starts_with("s3://"));
+
     let public_dir = args
         .public_dir
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../public"));
@@ -157,6 +161,7 @@ async fn main() {
         config.endpoint_url = args.s3_endpoint.clone();
         config.access_key_id = args.aws_access_key_id.clone();
         config.secret_access_key = args.aws_secret_access_key.clone();
+        config.force_path_style = args.s3_path_style;
         Arc::new(S3Storage::new(config).await)
     } else {
         let session_dir = args

@@ -126,7 +126,9 @@ impl S3Storage {
         if config.force_path_style {
             builder = builder.force_path_style(true);
         }
-        let client = Client::from_conf(builder.build());
+        let aws_config = builder.build();
+        eprintln!("S3 config: {:?}", aws_config);
+        let client = Client::from_conf(aws_config);
         let prefix = config
             .prefix
             .unwrap_or_default()

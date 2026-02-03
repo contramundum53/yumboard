@@ -5,7 +5,7 @@ use crate::state::{AppState, PersistentSessionData, Session};
 use uuid::Uuid;
 
 pub fn new_session_id() -> String {
-    Uuid::new_v4().to_string()
+    Uuid::now_v7().to_string()
 }
 
 pub fn normalize_session_id(value: &str) -> Option<String> {
