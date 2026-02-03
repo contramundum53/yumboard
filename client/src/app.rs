@@ -471,6 +471,16 @@ fn start_app() -> Result<(), JsValue> {
             if matches!(state.mode, Mode::Loading(_)) {
                 return;
             }
+            if palette_remove_mode_click.get() {
+                match action {
+                    PaletteAction::Remove(_) => {}
+                    _ => {
+                        let _ = ui_callback.palette_el.remove_attribute("data-remove");
+                        palette_remove_mode_click.set(false);
+                        return;
+                    }
+                }
+            }
             match action {
                 PaletteAction::Add => {
                     let color_str = ui_callback.color_input.value();
@@ -626,6 +636,28 @@ fn start_app() -> Result<(), JsValue> {
             onpointerup.as_ref().unchecked_ref(),
         )?;
         onpointerup.forget();
+
+        let remove_mode_doc = palette_remove_mode.clone();
+        let ui_doc = ui.clone();
+        let ondocclick = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
+            if !remove_mode_doc.get() {
+                return;
+            }
+            let target = event
+                .target()
+                .and_then(|target| target.dyn_into::<web_sys::Element>().ok());
+            let is_remove_button = target
+                .as_ref()
+                .and_then(|el| el.closest("[data-action=\"remove\"]").ok().flatten())
+                .is_some();
+            if !is_remove_button {
+                let _ = ui_doc.palette_el.remove_attribute("data-remove");
+                remove_mode_doc.set(false);
+            }
+        });
+        ui.document
+            .add_event_listener_with_callback("click", ondocclick.as_ref().unchecked_ref())?;
+        ondocclick.forget();
     }
 
     {
