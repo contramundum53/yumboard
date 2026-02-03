@@ -147,8 +147,10 @@ impl Ui {
     pub fn set_palette_remove_mode(&self, enabled: bool) {
         if enabled {
             let _ = self.palette_el.set_attribute("data-remove", "true");
+            let _ = self.color_input.set_attribute("data-remove", "true");
         } else {
             let _ = self.palette_el.remove_attribute("data-remove");
+            let _ = self.color_input.remove_attribute("data-remove");
         }
     }
 
