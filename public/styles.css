@@ -482,28 +482,6 @@ body {
   }
 }
 
-@media (max-width: 300px) {
-  .toolbar {
-    left: 16px;
-    right: 16px;
-    width: auto;
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .brand {
-    grid-column: 1 / -1;
-  }
-
-  .clear {
-    grid-column: 1 / -1;
-  }
-
-  .hud {
-    left: 16px;
-    right: 16px;
-  }
-}
-
 body:not(.is-chrome) * {
   animation: none !important;
 }
