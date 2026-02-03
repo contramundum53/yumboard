@@ -2,11 +2,16 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
+use js_sys::Uint8Array;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{Event, FileReader, HtmlAnchorElement, KeyboardEvent, PointerEvent, ProgressEvent};
+use web_sys::{
+    Blob, Event, FileReader, HtmlAnchorElement, KeyboardEvent, PointerEvent, ProgressEvent, Url,
+};
 
-use yumboard_shared::{ClientMessage, ServerMessage, Stroke, TransformOp};
+use yumboard_shared::{
+    encode_session_file, ClientMessage, ServerMessage, SessionFileData, Stroke, TransformOp,
+};
 
 use crate::actions::{
     adopt_strokes, apply_transform_operation, apply_transformed_strokes, clear_board, end_stroke,
@@ -20,7 +25,7 @@ use crate::geometry::{
     selected_strokes, selection_center, selection_hit_test,
 };
 use crate::palette::{palette_action_from_event, render_palette, PaletteAction};
-use crate::persistence::{build_pdf_html, open_print_window, parse_load_payload, SaveData};
+use crate::persistence::{build_pdf_html, open_print_window, parse_load_payload_bytes};
 use crate::render::redraw;
 use crate::state::{
     DrawMode, DrawPointerState, DrawState, EraseMode, InputActivity, LoadingState, Mode, PanMode,
@@ -111,8 +116,13 @@ fn pinch_distance(points: &[(f64, f64)]) -> f64 {
 
 fn read_load_payload(event: &ProgressEvent) -> Option<Vec<Stroke>> {
     let reader: FileReader = event.target()?.dyn_into().ok()?;
-    let text = reader.result().ok()?.as_string()?;
-    parse_load_payload(&text)
+    let buffer = reader
+        .result()
+        .ok()?
+        .dyn_into::<js_sys::ArrayBuffer>()
+        .ok()?;
+    let bytes = Uint8Array::new(&buffer).to_vec();
+    parse_load_payload_bytes(&bytes)
 }
 
 #[wasm_bindgen(start)]
@@ -601,22 +611,27 @@ fn start_app() -> Result<(), JsValue> {
         let ui_callback = ui.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |_| {
             let strokes = { save_state.borrow().strokes.clone() };
-            let payload = SaveData {
-                version: 1,
-                strokes,
+            let payload = SessionFileData { strokes };
+            let bytes = encode_session_file(&payload);
+            let array = js_sys::Uint8Array::from(bytes.as_slice());
+            let parts = js_sys::Array::new();
+            parts.push(&array.buffer());
+            let blob = match Blob::new_with_u8_array_sequence(&parts) {
+                Ok(blob) => blob,
+                Err(_) => return,
             };
-            let Ok(json) = serde_json::to_string(&payload) else {
-                return;
+            let href = match Url::create_object_url_with_blob(&blob) {
+                Ok(url) => url,
+                Err(_) => return,
             };
-            let encoded = js_sys::encode_uri_component(&json);
-            let href = format!("data:application/json;charset=utf-8,{encoded}");
             if let Ok(element) = ui_callback.document.create_element("a") {
                 if let Ok(anchor) = element.dyn_into::<HtmlAnchorElement>() {
                     anchor.set_href(&href);
-                    anchor.set_download("yumboard.json");
+                    anchor.set_download("yumboard.ybss");
                     anchor.click();
                 }
             }
+            let _ = Url::revoke_object_url(&href);
             let _ = ui_callback.save_menu.set_attribute("hidden", "");
             let _ = ui_callback
                 .save_button
@@ -742,7 +757,7 @@ fn start_app() -> Result<(), JsValue> {
                 });
             }
             ui_callback.set_load_busy(true);
-            let _ = reader.read_as_text(&file);
+            let _ = reader.read_as_array_buffer(&file);
             let mut state = load_state_onchange.borrow_mut();
             if let Mode::Loading(loading) = &mut state.mode {
                 loading.reader = Some(reader);

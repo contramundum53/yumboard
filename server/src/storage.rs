@@ -6,10 +6,9 @@ use aws_config::BehaviorVersion;
 use aws_credential_types::Credentials;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client;
-
-const SESSION_FILE_MAGIC: [u8; 4] = *b"YBSS";
-const SESSION_FILE_VERSION: u32 = 1;
-const SESSION_HEADER_LEN: usize = 8;
+use yumboard_shared::{
+    decode_session_file, encode_session_file, SessionFileData, SessionFileDecodeError,
+};
 
 #[async_trait]
 pub trait Storage: Send + Sync {
@@ -47,30 +46,21 @@ impl Storage for FileStorage {
 }
 
 fn encode_data(data: &PersistentSessionData) -> Vec<u8> {
-    let mut payload = Vec::new();
-    payload.extend_from_slice(&SESSION_FILE_MAGIC);
-    payload.extend_from_slice(&SESSION_FILE_VERSION.to_le_bytes());
-    let body = bincode::encode_to_vec(data, bincode::config::standard()).unwrap_or_default();
-    payload.extend_from_slice(&body);
-    payload
+    let file = SessionFileData {
+        strokes: data.strokes.clone(),
+    };
+    encode_session_file(&file)
 }
 
 fn decode_data(payload: &[u8]) -> Result<PersistentSessionData, String> {
-    if !(payload.starts_with(&SESSION_FILE_MAGIC) && payload.len() >= SESSION_HEADER_LEN) {
-        return Err("Invalid session file format".into());
-    }
-
-    let version = u32::from_le_bytes(
-        payload[4..8]
-            .try_into()
-            .map_err(|e| format!("Failed to read session file version: {e}"))?,
-    );
-    let body = &payload[SESSION_HEADER_LEN..];
-    match version {
-        1 => bincode::decode_from_slice(body, bincode::config::standard())
-            .map(|(data, _)| data)
-            .map_err(|e| format!("Failed to decode session data: {e}")),
-        _ => Err(format!("Unsupported session file version: {version}")),
+    match decode_session_file(payload) {
+        Ok(data) => Ok(PersistentSessionData {
+            strokes: data.strokes,
+        }),
+        Err(SessionFileDecodeError::UnsupportedVersion(version)) => {
+            Err(format!("Unsupported session file version: {version}"))
+        }
+        Err(SessionFileDecodeError::InvalidData) => Err("Invalid session file format".into()),
     }
 }
 

@@ -2,17 +2,21 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{Document, Event, HtmlIFrameElement};
 
-use yumboard_shared::Stroke;
+use yumboard_shared::{decode_session_file, SessionFileData, Stroke};
 
 use crate::state::{State, STROKE_UNIT};
 
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct SaveData {
-    pub version: u8,
-    pub strokes: Vec<Stroke>,
+pub fn parse_load_payload_bytes(bytes: &[u8]) -> Option<Vec<Stroke>> {
+    if let Ok(SessionFileData { strokes }) = decode_session_file(bytes) {
+        return Some(strokes);
+    }
+    let Ok(text) = String::from_utf8(bytes.to_vec()) else {
+        return None;
+    };
+    parse_load_payload_text(&text)
 }
 
-pub fn parse_load_payload(text: &str) -> Option<Vec<Stroke>> {
+pub fn parse_load_payload_text(text: &str) -> Option<Vec<Stroke>> {
     if let Some(strokes) = try_parse_strokes(text) {
         return Some(strokes);
     }
@@ -36,7 +40,16 @@ pub fn parse_load_payload(text: &str) -> Option<Vec<Stroke>> {
 }
 
 fn try_parse_strokes(text: &str) -> Option<Vec<Stroke>> {
-    if let Ok(data) = serde_json::from_str::<SaveData>(text) {
+    if let Ok(data) = serde_json::from_str::<SessionFileData>(text) {
+        return Some(data.strokes);
+    }
+    #[derive(serde::Deserialize)]
+    struct LegacySaveData {
+        version: u8,
+        strokes: Vec<Stroke>,
+    }
+    if let Ok(data) = serde_json::from_str::<LegacySaveData>(text) {
+        let _ = data.version;
         return Some(data.strokes);
     }
     serde_json::from_str::<Vec<Stroke>>(text).ok()

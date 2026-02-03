@@ -1,6 +1,12 @@
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
+pub mod session_format;
+
+pub use session_format::{
+    decode_session_file, encode_session_file, SessionFileData, SessionFileDecodeError,
+};
+
 #[derive(Serialize, Deserialize, Encode, Decode, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[serde(transparent)]
 pub struct StrokeId([u64; 2]);
