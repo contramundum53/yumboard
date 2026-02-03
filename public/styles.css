@@ -157,16 +157,16 @@ body {
   position: absolute;
   top: -7px;
   right: -7px;
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   border-radius: 999px;
   border: 1px solid #b22a2a;
-  padding: 1px 1px 1px 1px;
   background: #e03b3b;
   color: #ffffff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  line-height: 0;
   box-shadow: 0 4px 10px rgba(224, 59, 59, 0.35);
   opacity: 0;
   transform: scale(0.85);
@@ -178,6 +178,11 @@ body {
 .swatch-remove img {
   width: 14px;
   height: 14px;
+  display: block;
+}
+
+.swatch-remove img {
+  filter: brightness(0) invert(1);
 }
 
 .palette[data-remove="true"] .swatch-remove {
