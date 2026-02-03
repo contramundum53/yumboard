@@ -21,7 +21,7 @@ pub async fn ping_handler() -> impl IntoResponse {
 
 pub async fn root_handler(State(state): State<AppState>) -> impl IntoResponse {
     let session_id = new_session_id();
-    let _ = get_or_create_session(&state, &session_id).await;
+    let _ = get_or_create_session(&state, &session_id, true).await;
     Redirect::to(&format!("/s/{session_id}"))
 }
 
@@ -34,11 +34,12 @@ pub async fn session_handler(
         Some(id) => id,
         None => return StatusCode::NOT_FOUND.into_response(),
     };
-    if let Err(SessionLoadError::Storage(error)) = get_or_create_session(&state, &session_id).await
+    if let Err(SessionLoadError::Storage(error)) =
+        get_or_create_session(&state, &session_id, false).await
     {
         eprintln!("Session load error for {session_id}: {error}");
         let new_session_id = new_session_id();
-        let _ = get_or_create_session(&state, &new_session_id).await;
+        let _ = get_or_create_session(&state, &new_session_id, true).await;
         return Redirect::to(&format!("/s/{new_session_id}?load_error=1")).into_response();
     }
     match tokio::fs::read_to_string(index_file).await {
@@ -56,7 +57,7 @@ pub async fn ws_handler(
         Some(id) => id,
         None => return StatusCode::NOT_FOUND.into_response(),
     };
-    match get_or_create_session(&state, &session_id).await {
+    match get_or_create_session(&state, &session_id, false).await {
         Ok(session) => {
             ws.on_upgrade(move |socket| handle_socket(socket, state, session_id, session))
         }
@@ -200,12 +201,20 @@ async fn handle_socket(
             }
         }
     }
-    if let Some(data) = maybe_data {
+    let can_remove = if let Some(data) = maybe_data {
         eprint!("Saving finished session {session_id}... ");
-        save_session(&state, &session_id, &data).await;
-        eprintln!("done.");
-    }
-    if should_remove {
+        let save_res = save_session(&state, &session_id, &data).await;
+        let can_remove = save_res.is_ok();
+        if let Err(err) = save_res {
+            eprintln!("failed: {err}");
+        } else {
+            eprintln!("done.");
+        }
+        can_remove
+    } else {
+        true
+    };
+    if should_remove && can_remove {
         let mut sessions = state.sessions.write().await;
         if let Some(current) = sessions.get(&session_id) {
             if Arc::ptr_eq(current, &session) {

@@ -72,6 +72,7 @@ async fn save_all_sessions(state: &AppState, reset_dirty: bool) {
             .map(|(session_id, session)| (session_id.clone(), session.clone()))
             .collect::<Vec<_>>()
     };
+    let mut to_check_removeable = vec![];
     for (session_id, session) in sessions {
         let data = {
             let session = session.read().await;
@@ -81,10 +82,37 @@ async fn save_all_sessions(state: &AppState, reset_dirty: bool) {
             session.to_persistent_session_data()
         };
         eprint!("Saving session {session_id}... ");
-        save_session(state, &session_id, &data).await;
-        eprintln!("done.");
-        if reset_dirty {
-            session.write().await.dirty = false;
+        let res = save_session(state, &session_id, &data).await;
+        if let Err(err) = res {
+            eprintln!("failed: {err}");
+        } else {
+            eprintln!("done.");
+            if reset_dirty {
+                let mut session = session.write().await;
+                session.dirty = false;
+                if session.peers.is_empty() {
+                    to_check_removeable.push(session_id);
+                }
+            }
+        }
+    }
+    if to_check_removeable.is_empty() {
+        return;
+    }
+
+    assert!(reset_dirty);
+    let mut sessions = state.sessions.write().await;
+    for session_id in to_check_removeable {
+        let removeable = match sessions.get(&session_id) {
+            Some(session) => {
+                let session = session.read().await;
+                session.peers.is_empty() && !session.dirty
+            }
+            None => false,
+        };
+        if removeable {
+            println!("Zombie session safely removed: {session_id}");
+            sessions.remove(&session_id);
         }
     }
 }

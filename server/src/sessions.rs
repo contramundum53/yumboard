@@ -21,22 +21,28 @@ pub enum SessionLoadError {
 pub async fn get_or_create_session(
     state: &AppState,
     session_id: &str,
+    create_new: bool,
 ) -> Result<Arc<tokio::sync::RwLock<Session>>, SessionLoadError> {
     if let Some(session) = state.sessions.read().await.get(session_id).cloned() {
         return Ok(session);
     }
-    eprintln!("Loading/Creating session {session_id}...");
-    let res = state.storage.load_session(session_id).await;
+    let data = if create_new {
+        eprintln!("Creating new session {session_id}...");
+        PersistentSessionData::default()
+    } else {
+        eprintln!("Loading/Creating session {session_id}...");
+        let res = state.storage.load_session(session_id).await;
 
-    let data = match res {
-        Ok(data) => data,
-        Err(StorageError::NotFound) => {
-            eprintln!("Session {session_id} not found. Creating new session.");
-            PersistentSessionData::default()
-        }
-        Err(StorageError::Other(err)) => {
-            eprintln!("Could not load session {session_id}: {err}");
-            return Err(SessionLoadError::Storage(err));
+        match res {
+            Ok(data) => data,
+            Err(StorageError::NotFound) => {
+                eprintln!("Session {session_id} not found. Creating new session.");
+                PersistentSessionData::default()
+            }
+            Err(StorageError::Other(err)) => {
+                eprintln!("Could not load session {session_id}: {err}");
+                return Err(SessionLoadError::Storage(err));
+            }
         }
     };
 
@@ -53,6 +59,10 @@ pub async fn get_or_create_session(
     Ok(entry.clone())
 }
 
-pub async fn save_session(state: &AppState, session_id: &str, data: &PersistentSessionData) {
-    state.storage.save_session(session_id, data).await;
+pub async fn save_session(
+    state: &AppState,
+    session_id: &str,
+    data: &PersistentSessionData,
+) -> Result<(), String> {
+    state.storage.save_session(session_id, data).await
 }

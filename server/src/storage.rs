@@ -28,7 +28,11 @@ impl std::fmt::Display for StorageError {
 #[async_trait]
 pub trait Storage: Send + Sync {
     async fn load_session(&self, session_id: &str) -> Result<PersistentSessionData, StorageError>;
-    async fn save_session(&self, session_id: &str, data: &PersistentSessionData);
+    async fn save_session(
+        &self,
+        session_id: &str,
+        data: &PersistentSessionData,
+    ) -> Result<(), String>;
 }
 
 pub struct FileStorage {
@@ -55,12 +59,17 @@ impl Storage for FileStorage {
         decode_data(&payload).map_err(StorageError::Other)
     }
 
-    async fn save_session(&self, session_id: &str, data: &PersistentSessionData) {
+    async fn save_session(
+        &self,
+        session_id: &str,
+        data: &PersistentSessionData,
+    ) -> Result<(), String> {
         let path = self.session_dir.join(format!("{session_id}.ybss"));
         let payload = encode_data(data);
         if let Err(error) = tokio::fs::write(path, payload).await {
-            eprintln!("Failed to save session {session_id}: {error}");
+            return Err(format!("Failed to save session {session_id}: {error}"));
         }
+        Ok(())
     }
 }
 
@@ -194,7 +203,11 @@ impl Storage for S3Storage {
         decode_data(&bytes).map_err(StorageError::Other)
     }
 
-    async fn save_session(&self, session_id: &str, data: &PersistentSessionData) {
+    async fn save_session(
+        &self,
+        session_id: &str,
+        data: &PersistentSessionData,
+    ) -> Result<(), String> {
         let key = self.object_key(session_id);
         let payload = encode_data(data);
         let body = ByteStream::from(payload);
@@ -207,7 +220,10 @@ impl Storage for S3Storage {
             .send()
             .await
         {
-            eprintln!("Failed to save session {session_id} to s3: {error:?}");
+            return Err(format!(
+                "Failed to save session {session_id} to s3: {error:?}"
+            ));
         }
+        Ok(())
     }
 }
