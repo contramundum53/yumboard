@@ -144,6 +144,14 @@ impl Ui {
         self.color_input.set_class_name("hidden-color active");
     }
 
+    pub fn set_palette_remove_mode(&self, enabled: bool) {
+        if enabled {
+            let _ = self.palette_el.set_attribute("data-remove", "true");
+        } else {
+            let _ = self.palette_el.remove_attribute("data-remove");
+        }
+    }
+
     pub fn show_reload_banner(&self, message: &str) {
         self.reload_message.set_text_content(Some(message));
         let _ = self.reload_banner.remove_attribute("hidden");

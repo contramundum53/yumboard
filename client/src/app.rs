@@ -88,15 +88,6 @@ fn palette_selected(mode: &Mode) -> Option<usize> {
     }
 }
 
-fn set_palette_remove_mode(ui: &Ui, state: &mut State, enabled: bool) {
-    state.palette_remove_mode = enabled;
-    if enabled {
-        let _ = ui.palette_el.set_attribute("data-remove", "true");
-    } else {
-        let _ = ui.palette_el.remove_attribute("data-remove");
-    }
-}
-
 fn take_loading_previous(state: &mut State) -> Option<Mode> {
     let placeholder = Mode::Pan(PanMode::Idle);
     match std::mem::replace(&mut state.mode, placeholder) {
@@ -483,7 +474,8 @@ fn start_app() -> Result<(), JsValue> {
                 match action {
                     PaletteAction::Remove(_) => {}
                     _ => {
-                        set_palette_remove_mode(&ui_callback, &mut state, false);
+                        state.palette_remove_mode = false;
+                        ui_callback.set_palette_remove_mode(false);
                         return;
                     }
                 }
@@ -563,7 +555,8 @@ fn start_app() -> Result<(), JsValue> {
             }
 
             if state.palette_remove_mode {
-                set_palette_remove_mode(&ui_callback, &mut state, false);
+                state.palette_remove_mode = false;
+                ui_callback.set_palette_remove_mode(false);
             }
         });
         ui.palette_el
@@ -577,7 +570,8 @@ fn start_app() -> Result<(), JsValue> {
             event.stop_propagation();
             let mut state = remove_state.borrow_mut();
             let next = !state.palette_remove_mode;
-            set_palette_remove_mode(&ui_ctx, &mut state, next);
+            state.palette_remove_mode = next;
+            ui_ctx.set_palette_remove_mode(next);
         });
         ui.palette_el.add_event_listener_with_callback(
             "contextmenu",
@@ -592,7 +586,8 @@ fn start_app() -> Result<(), JsValue> {
             event.stop_propagation();
             let mut state = remove_state.borrow_mut();
             let next = !state.palette_remove_mode;
-            set_palette_remove_mode(&ui_ctx, &mut state, next);
+            state.palette_remove_mode = next;
+            ui_ctx.set_palette_remove_mode(next);
         });
         ui.color_input.add_event_listener_with_callback(
             "contextmenu",
@@ -617,7 +612,8 @@ fn start_app() -> Result<(), JsValue> {
                 let press_state = press_state.clone();
                 Closure::once_into_js(move || {
                     let mut state = press_state.borrow_mut();
-                    set_palette_remove_mode(&ui_press, &mut state, true);
+                    state.palette_remove_mode = true;
+                    ui_press.set_palette_remove_mode(true);
                 })
             };
             let Ok(id) = window_press.set_timeout_with_callback_and_timeout_and_arguments_0(
@@ -670,7 +666,8 @@ fn start_app() -> Result<(), JsValue> {
                 return;
             }
             if !is_remove_button {
-                set_palette_remove_mode(&ui_doc, &mut state, false);
+                state.palette_remove_mode = false;
+                ui_doc.set_palette_remove_mode(false);
             }
         });
         ui.document
