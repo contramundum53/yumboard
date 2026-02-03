@@ -29,7 +29,7 @@ impl FileStorage {
 #[async_trait]
 impl Storage for FileStorage {
     async fn load_session(&self, session_id: &str) -> Result<PersistentSessionData, String> {
-        let path = self.session_dir.join(format!("{session_id}.bin"));
+        let path = self.session_dir.join(format!("{session_id}.ybss"));
         let payload = tokio::fs::read(path)
             .await
             .map_err(|e| format!("Failed to read session file for {session_id}: {e}"))?;
@@ -37,7 +37,7 @@ impl Storage for FileStorage {
     }
 
     async fn save_session(&self, session_id: &str, data: &PersistentSessionData) {
-        let path = self.session_dir.join(format!("{session_id}.bin"));
+        let path = self.session_dir.join(format!("{session_id}.ybss"));
         let payload = encode_data(data);
         if let Err(error) = tokio::fs::write(path, payload).await {
             eprintln!("Failed to save session {session_id}: {error}");
@@ -133,9 +133,9 @@ impl S3Storage {
 
     fn object_key(&self, session_id: &str) -> String {
         if self.prefix.is_empty() {
-            format!("{session_id}.bin")
+            format!("{session_id}.ybss")
         } else {
-            format!("{}/{session_id}.bin", self.prefix)
+            format!("{}/{session_id}.ybss", self.prefix)
         }
     }
 }

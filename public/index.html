@@ -57,7 +57,7 @@
         <span class="icon-mask" style="--icon-url: url('/icon/save.svg');"></span>
       </button>
       <div id="saveMenu" class="menu" hidden>
-        <button id="saveJson" class="button-base menu-item" type="button">Save Session</button>
+        <button id="saveSession" class="button-base menu-item" type="button">Save Session</button>
         <button id="savePdf" class="button-base menu-item" type="button">Save PDF</button>
       </div>
     </div>
@@ -66,7 +66,7 @@
       <span class="icon-mask" style="--icon-url: url('/icon/load.svg');"></span>
     </button>
 
-    <input id="loadFile" type="file" accept="application/json" hidden />
+    <input id="loadFile" type="file" accept="application/octet-stream" hidden />
     <input id="color" class="hidden-color" type="color" value="#1f1f1f" />
 
     <button id="clear" class="button-base clear" type="button" aria-label="Clear board">

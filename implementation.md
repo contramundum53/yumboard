@@ -14,7 +14,7 @@ project is structured, how state flows, and where to extend it.
 - `public/`: Static files served by the server:
   - `index.html`, `styles.css`, `app.js`, icons under `public/icon/`
   - `public/pkg/`: output of `wasm-pack build client --target web --out-dir ../public/pkg`
-- `sessions/`: on-disk server session snapshots (`.bin` from bincode; old `.json` may exist).
+- `sessions/`: on-disk server session snapshots (`.ybss` from bincode; old `.json` may exist).
 - `k8s/`, `Dockerfile`: deploy artifacts.
 
 ## Core Data Model
@@ -154,7 +154,7 @@ Transform grouping:
 
 `server/src/sessions.rs`:
 
-- Session snapshots are stored as `sessions_dir/{session_id}.bin`.
+- Session snapshots are stored as `sessions_dir/{session_id}.ybss`.
 - Encoding is `bincode` of `Vec<Stroke>` (undo/redo buffers are *not* persisted).
 
 Saving strategy:
