@@ -21,7 +21,11 @@ pub async fn ping_handler() -> impl IntoResponse {
 
 pub async fn root_handler(State(state): State<AppState>) -> impl IntoResponse {
     let session_id = new_session_id();
-    let _ = get_or_create_session(&state, &session_id, true).await;
+    if let Err(SessionLoadError::Storage(error)) =
+        get_or_create_session(&state, &session_id, true).await
+    {
+        eprintln!("Session load error for {session_id}: {error}");
+    }
     Redirect::to(&format!("/s/{session_id}"))
 }
 
@@ -44,7 +48,10 @@ pub async fn session_handler(
     }
     match tokio::fs::read_to_string(index_file).await {
         Ok(contents) => Html(contents).into_response(),
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        Err(error) => {
+            eprintln!("Failed to read index.html: {error}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
     }
 }
 
