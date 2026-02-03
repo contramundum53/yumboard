@@ -105,6 +105,9 @@ fn handle_load_error_banner(window: &web_sys::Window, ui: &Ui) {
     }
     ui.set_status("closed", "Load error");
     ui.show_reload_banner("Failed to load session. Started a new session.");
+    let _ = window.alert_with_message(
+        "Failed to load the session due to a server error. A new session was created.",
+    );
 }
 
 fn take_loading_previous(state: &mut State) -> Option<Mode> {
