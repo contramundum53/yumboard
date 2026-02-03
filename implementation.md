@@ -14,7 +14,10 @@ project is structured, how state flows, and where to extend it.
 - `public/`: Static files served by the server:
   - `index.html`, `styles.css`, `app.js`, icons under `public/icon/`
   - `public/pkg/`: output of `wasm-pack build client --target web --out-dir ../public/pkg`
-- `sessions/`: on-disk server session snapshots (`.ybss` from bincode; old `.json` may exist).
+- `sessions/`: default on-disk server session snapshots for `FileStorage`
+  (`{session_id}.ybss`; old `.json` may exist but is not loaded by the server).
+  - When using S3 storage, snapshots are stored as S3 objects under the configured prefix instead
+    of this directory.
 - `k8s/`, `Dockerfile`: deploy artifacts.
 
 ## Core Data Model
@@ -60,6 +63,9 @@ JSON text frames for debugging/backward-compatibility. All message types are def
 
 - Visiting `/` creates a new session and redirects to `/s/:session_id`.
 - WebSocket endpoint is `/ws/:session_id`.
+- If session storage fails to load an existing session (server-side error, not "not found"), the
+  server redirects to a new session and appends `?load_error=1` to the URL. The client surfaces
+  this with a banner + `window.alert` to prevent silent data loss.
 
 The client computes the WS URL at runtime (`client/src/net.rs:websocket_url`) using:
 
@@ -70,10 +76,13 @@ The client computes the WS URL at runtime (`client/src/net.rs:websocket_url`) us
 
 - `sync { strokes }`: full state snapshot (sent on connect, and on `load`).
 - `stroke:start`, `stroke:points`, `stroke:end`: incremental drawing.
+- `stroke:move`: legacy single-point append (server supports it; current client uses batched
+  `stroke:points`).
 - `stroke:remove`: delete a stroke by id.
 - `stroke:restore`: restore a whole stroke (used for undo/redo + clear undo).
-- `stroke:replace`: replace a stroke with the same id (used for transforms).
+- `stroke:replace`: replace a whole stroke (used by undo/redo and any future "edit stroke" flows).
 - `transform:update { ids, op }`: incremental transform updates (translate/scale/rotate deltas).
+  Peers apply the same op locally, so transforms do not resend full stroke coordinate lists.
 - `clear`: clear all strokes.
 
 ### Client -> Server
@@ -93,12 +102,16 @@ The client computes the WS URL at runtime (`client/src/net.rs:websocket_url`) us
 `server/src/main.rs`:
 
 - CLI args via `clap`:
-  - `--sessions-dir`, `--public-dir`, `--backup-interval`, `--port`
+  - `--sessions-dir` (defaults to `../sessions`; if it starts with `s3://`, enables S3 storage)
+  - `--public-dir` (defaults to `../public`)
+  - `--backup-interval`, `--port`
   - TLS: `--tls-cert` and `--tls-key` (PEM; useful for mkcert / secure context testing)
+  - S3: `--aws-access-key-id`, `--aws-secret-access-key`, `--s3-endpoint`, `--s3-path-style`
 - Serves:
   - `/` -> redirect to a new `/s/:uuid`
   - `/s/:uuid` -> serves `public/index.html` (single-page app)
   - `/ws/:uuid` -> websocket handler
+  - `/ping` -> used as a Safari/iOS "kick" fetch when the WS is stuck connecting
   - everything else from `public/` via `ServeDir`
 - Adds `Cache-Control/Pragma/Expires` headers to disable caching (helps iPad/Safari iteration).
 
@@ -107,6 +120,7 @@ The client computes the WS URL at runtime (`client/src/net.rs:websocket_url`) us
 `server/src/state.rs`:
 
 - Global: `AppState.sessions: Arc<RwLock<HashMap<session_id, Arc<RwLock<Session>>>>>`
+- Global: `AppState.storage: Arc<dyn Storage>` (storage backend abstraction)
 - Per-session: `Session` is behind a single `Arc<RwLock<Session>>` to keep updates consistent.
 
 Key `Session` fields:
@@ -119,6 +133,11 @@ Key `Session` fields:
   transform grouping.
 - `peers: HashMap<connection_uuid, mpsc::UnboundedSender<ServerMessage>>`: broadcast fanout.
 - `dirty: bool`: flipped on any client message; used by periodic backups and on-last-peer exit.
+
+Persistence boundary:
+
+- `PersistentSessionData` is the "saveable" subset of `Session` (currently just `strokes`).
+- `Session::{to_persistent_session_data, from_persistent_session_data}` convert between the two.
 
 ### Apply + Broadcast
 
@@ -152,16 +171,35 @@ Transform grouping:
 
 ### Persistence / Backups
 
-`server/src/sessions.rs`:
+On-disk/session storage format (shared with the client):
 
-- Session snapshots are stored as `sessions_dir/{session_id}.ybss`.
-- Encoding is `bincode` of `Vec<Stroke>` (undo/redo buffers are *not* persisted).
+- Declared in `shared/src/session_format.rs`.
+- File extension: `.ybss`.
+- Header: 4-byte magic `YBSS` + little-endian `u32` version (`SESSION_FILE_VERSION`).
+- Body: `bincode` (v2) encoding of `SessionFileData { strokes: Vec<Stroke> }`.
+
+Storage backend abstraction:
+
+- `server/src/storage.rs` defines a `Storage` trait (async via `async_trait`) and implementations:
+  - `FileStorage`: reads/writes `{sessions_dir}/{session_id}.ybss`
+  - `S3Storage`: reads/writes `{prefix}/{session_id}.ybss` in an S3 bucket (prefix can be empty)
+- `StorageError` distinguishes `NotFound` from other errors so the server can avoid silently
+  starting an empty session when storage is unhealthy.
 
 Saving strategy:
 
-- Periodic backup loop saves all `dirty` sessions every `--backup-interval` seconds.
-- When the last peer disconnects, the server saves the session (if `dirty`) and removes it from
-  memory.
+- Periodic backup loop (`server/src/main.rs`) saves all `dirty` sessions every
+  `--backup-interval` seconds.
+- When the last peer disconnects (`server/src/handlers.rs`), the server saves the session (if
+  `dirty`) and removes it from memory if the save succeeded.
+- On shutdown, the server saves all sessions once before exiting.
+
+Session load error behavior:
+
+- If loading an existing session fails with a non-`NotFound` error, `/s/:session_id` redirects to a
+  new session and appends `?load_error=1` so the client can warn the user.
+- `/ws/:session_id` returns HTTP 503 (so the client stays offline instead of joining an empty
+  in-memory session).
 
 ## Client Implementation
 
@@ -181,10 +219,9 @@ Saving strategy:
 
 - `Mode` is the primary interaction mode:
   - `Draw(DrawState)`, `Erase(EraseMode)`, `Select(SelectState)`, `Pan(PanMode)`, `Loading(LoadingState)`
-- Touch gestures are tracked separately from `Mode`:
-  - `touch_points: HashMap<pointer_id, (x,y)>`
-  - `pinch: Option<PinchState>`
-  - `touch_pan: Option<PanMode>`
+- Touch gestures and high-frequency pointer state are tracked separately from `Mode`:
+  - `input_activity: InputActivity` (`None | Draw | Pinch | Pan`)
+  - `touch_points: HashMap<pointer_id, (x,y)>` (for 1-finger pan and 2-finger pinch)
 
 Design intent: finger gestures (touch) pan/pinch without mutating the primary mode (so a touch
 pan does not permanently “steal” the pen tool).
@@ -251,11 +288,15 @@ flags to help local iPad testing.
 
 ### Save / Load
 
-- Save JSON: creates a `data:` URL with `{ version: 1, strokes: [...] }` (`SaveData`).
+- Save Session: downloads a binary `yumboard.ybss` file using the shared format in
+  `shared/src/session_format.rs` (via `encode_session_file(SessionFileData { strokes })`).
 - Save PDF: builds an SVG in an off-screen iframe and triggers `window.print()`. The SVG `viewBox`
   is set from content bounds so the whole drawing fits on one page.
-- Load: reads a JSON file asynchronously (`FileReader`) and broadcasts `load { strokes }` after
-  adopting it locally.
+- Load: reads a file asynchronously (`FileReader.readAsArrayBuffer`) and parses either:
+  - `.ybss` via `decode_session_file`, or
+  - legacy JSON (several shapes) for backwards compatibility.
+  After adopting it locally, the client broadcasts `load { strokes }` so the server replaces the
+  session state and broadcasts a `sync`.
   - While reading, the mode becomes `Mode::Loading { previous: Mode, ... }`.
 
 ## Styling / Safari Notes
@@ -270,6 +311,8 @@ flags to help local iPad testing.
 
 The “hidden” color picker is an actual `<input type="color">` positioned on top of the currently
 selected swatch (Safari requires it to be a real input to open the picker UI).
+When palette removal mode is enabled, pointer-events are disabled on the hidden color input so it
+cannot steal clicks meant for the remove buttons.
 
 ## Build / Run
 
@@ -299,20 +342,27 @@ cargo run --release -p yumboard_server -- \
   - server binary `yumboard_server`
 - `k8s/yumboard.yaml` contains a Deployment/Service/Ingress example and resource settings.
   - If you want session persistence, wire a real volume and pass `--sessions-dir` accordingly.
+  - If you deploy from a working directory where `../public` is not correct, pass `--public-dir`
+    so the server can locate `index.html`, `app.js`, and `pkg/`.
+  - To use object storage for sessions, pass `--sessions-dir s3://bucket/prefix` plus the S3 flags
+    (`--s3-endpoint`, credentials, and optionally `--s3-path-style`).
 
 ## Where To Implement New Features
 
 - New protocol messages: `shared/src/lib.rs` (+ update both server/client handlers).
 - Server-side semantics, validation, undo/redo rules: `server/src/logic.rs`.
-- Session lifecycle / persistence: `server/src/handlers.rs`, `server/src/sessions.rs`.
+- Session lifecycle / HTTP behavior: `server/src/handlers.rs`, `server/src/sessions.rs`.
+- Storage backends and file format: `server/src/storage.rs`, `shared/src/session_format.rs`.
 - Client input routing/state machine: `client/src/app.rs`, `client/src/state.rs`.
 - Geometry/transforms: `client/src/geometry.rs`.
 - Rendering: `client/src/render.rs`.
 - Save/load/PDF: `client/src/persistence.rs`.
+- Palette UI: `client/src/palette.rs`, `public/styles.css`.
 
 ## Known Limitations / Gotchas
 
-- Session storage format is `bincode` of `Vec<Stroke>` and does not load old `.json` snapshots.
+- Session storage format is versioned (`YBSS` + `u32` version header) but the body is `bincode` v2.
+  Old `.json` snapshots in `sessions/` are not loaded by the server.
 - Apple Pencil event delivery is browser-dependent; pointer capture + coalesced/raw events help,
   but “never drop an event” is not guaranteed by mobile browsers.
 - iOS Safari layout is sensitive; the size slider has a dedicated code path in CSS.
