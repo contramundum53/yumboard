@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
@@ -460,6 +460,8 @@ fn start_app() -> Result<(), JsValue> {
     {
         let palette_state = state.clone();
         let ui_callback = ui.clone();
+        let palette_remove_mode = Rc::new(Cell::new(false));
+        let palette_remove_mode_click = palette_remove_mode.clone();
         let onclick = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
             let action = match palette_action_from_event(&event) {
                 Some(action) => action,
@@ -489,6 +491,34 @@ fn start_app() -> Result<(), JsValue> {
                     ui_callback.show_color_input(Some(palette_selected));
                     ui_callback.color_input.click();
                 }
+                PaletteAction::Remove(index) => {
+                    if state.palette.len() <= 1 || index >= state.palette.len() {
+                        return;
+                    }
+                    state.palette.remove(index);
+                    let current_selected = palette_selected(&state.mode).unwrap_or(0);
+                    let mut next_selected = current_selected;
+                    if index == current_selected {
+                        next_selected = index.min(state.palette.len().saturating_sub(1));
+                    } else if index < current_selected {
+                        next_selected = current_selected.saturating_sub(1);
+                    }
+                    state.mode = Mode::Draw(DrawState {
+                        mode: DrawMode::Idle,
+                        palette_selected: next_selected,
+                    });
+                    if let Some(color) = state.palette.get(next_selected).cloned() {
+                        ui_callback.color_input.set_value(&color);
+                    }
+                    ui_callback.sync_tool_ui(&state, false);
+                    render_palette(
+                        &ui_callback.document,
+                        &ui_callback.palette_el,
+                        &state.palette,
+                        Some(next_selected),
+                    );
+                    ui_callback.show_color_input(Some(next_selected));
+                }
                 PaletteAction::Select(index) => {
                     if index >= state.palette.len() {
                         return;
@@ -514,10 +544,88 @@ fn start_app() -> Result<(), JsValue> {
                     }
                 }
             }
+
+            if palette_remove_mode_click.get() {
+                let _ = ui_callback.palette_el.remove_attribute("data-remove");
+                palette_remove_mode_click.set(false);
+            }
         });
         ui.palette_el
             .add_event_listener_with_callback("click", onclick.as_ref().unchecked_ref())?;
         onclick.forget();
+
+        let remove_mode_ctx = palette_remove_mode.clone();
+        let ui_ctx = ui.clone();
+        let oncontextmenu = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
+            event.prevent_default();
+            let next = !remove_mode_ctx.get();
+            remove_mode_ctx.set(next);
+            if next {
+                let _ = ui_ctx.palette_el.set_attribute("data-remove", "true");
+            } else {
+                let _ = ui_ctx.palette_el.remove_attribute("data-remove");
+            }
+        });
+        ui.palette_el.add_event_listener_with_callback(
+            "contextmenu",
+            oncontextmenu.as_ref().unchecked_ref(),
+        )?;
+        oncontextmenu.forget();
+
+        let press_state = palette_remove_mode.clone();
+        let ui_press = ui.clone();
+        let window_press = window.clone();
+        let long_press_timer = Rc::new(Cell::new(None));
+        let long_press_timer_up = long_press_timer.clone();
+        let onpointerdown = Closure::<dyn FnMut(PointerEvent)>::new(move |event: PointerEvent| {
+            if event.button() != 0 {
+                return;
+            }
+            if press_state.get() {
+                return;
+            }
+            let timer = {
+                let ui_press = ui_press.clone();
+                let press_state = press_state.clone();
+                Closure::once_into_js(move || {
+                    press_state.set(true);
+                    let _ = ui_press.palette_el.set_attribute("data-remove", "true");
+                })
+            };
+            let Ok(id) = window_press.set_timeout_with_callback_and_timeout_and_arguments_0(
+                timer.as_ref().unchecked_ref(),
+                500,
+            ) else {
+                return;
+            };
+            long_press_timer_up.set(Some(id));
+        });
+        ui.palette_el.add_event_listener_with_callback(
+            "pointerdown",
+            onpointerdown.as_ref().unchecked_ref(),
+        )?;
+        onpointerdown.forget();
+
+        let window_release = window.clone();
+        let long_press_timer_release = long_press_timer.clone();
+        let onpointerup = Closure::<dyn FnMut(PointerEvent)>::new(move |_| {
+            let id = long_press_timer_release.get();
+            long_press_timer_release.set(None);
+            if let Some(id) = id {
+                window_release.clear_timeout_with_handle(id);
+            }
+        });
+        ui.palette_el
+            .add_event_listener_with_callback("pointerup", onpointerup.as_ref().unchecked_ref())?;
+        ui.palette_el.add_event_listener_with_callback(
+            "pointercancel",
+            onpointerup.as_ref().unchecked_ref(),
+        )?;
+        ui.palette_el.add_event_listener_with_callback(
+            "pointerleave",
+            onpointerup.as_ref().unchecked_ref(),
+        )?;
+        onpointerup.forget();
     }
 
     {
