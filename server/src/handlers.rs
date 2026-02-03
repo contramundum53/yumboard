@@ -10,7 +10,9 @@ use uuid::Uuid;
 use yumboard_shared::{ClientMessage, ServerMessage};
 
 use crate::logic::{apply_client_message, broadcast_all, broadcast_except};
-use crate::sessions::{get_or_create_session, new_session_id, normalize_session_id, save_session};
+use crate::sessions::{
+    get_or_create_session, new_session_id, normalize_session_id, save_session, SessionLoadError,
+};
 use crate::state::AppState;
 
 pub async fn ping_handler() -> impl IntoResponse {
@@ -32,7 +34,13 @@ pub async fn session_handler(
         Some(id) => id,
         None => return StatusCode::NOT_FOUND.into_response(),
     };
-    let _ = get_or_create_session(&state, &session_id).await;
+    if let Err(SessionLoadError::Storage(error)) = get_or_create_session(&state, &session_id).await
+    {
+        eprintln!("Session load error for {session_id}: {error}");
+        let new_session_id = new_session_id();
+        let _ = get_or_create_session(&state, &new_session_id).await;
+        return Redirect::to(&format!("/s/{new_session_id}?load_error=1")).into_response();
+    }
     match tokio::fs::read_to_string(index_file).await {
         Ok(contents) => Html(contents).into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -48,15 +56,27 @@ pub async fn ws_handler(
         Some(id) => id,
         None => return StatusCode::NOT_FOUND.into_response(),
     };
-    ws.on_upgrade(move |socket| handle_socket(socket, state, session_id))
+    match get_or_create_session(&state, &session_id).await {
+        Ok(session) => {
+            ws.on_upgrade(move |socket| handle_socket(socket, state, session_id, session))
+        }
+        Err(SessionLoadError::Storage(error)) => {
+            eprintln!("Session load error for {session_id}: {error}");
+            StatusCode::SERVICE_UNAVAILABLE.into_response()
+        }
+    }
 }
 
-async fn handle_socket(socket: WebSocket, state: AppState, session_id: String) {
+async fn handle_socket(
+    socket: WebSocket,
+    state: AppState,
+    session_id: String,
+    session: Arc<tokio::sync::RwLock<crate::state::Session>>,
+) {
     let (mut socket_sender, mut socket_receiver) = socket.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<ServerMessage>();
     let connection_id = Uuid::new_v4();
 
-    let session = get_or_create_session(&state, &session_id).await;
     {
         let mut session = session.write().await;
         session.peers.insert(connection_id, tx);

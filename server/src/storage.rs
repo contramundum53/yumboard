@@ -10,9 +10,24 @@ use yumboard_shared::{
     decode_session_file, encode_session_file, SessionFileData, SessionFileDecodeError,
 };
 
+#[derive(Debug)]
+pub enum StorageError {
+    NotFound,
+    Other(String),
+}
+
+impl std::fmt::Display for StorageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StorageError::NotFound => write!(f, "session-not-found"),
+            StorageError::Other(message) => write!(f, "{message}"),
+        }
+    }
+}
+
 #[async_trait]
 pub trait Storage: Send + Sync {
-    async fn load_session(&self, session_id: &str) -> Result<PersistentSessionData, String>;
+    async fn load_session(&self, session_id: &str) -> Result<PersistentSessionData, StorageError>;
     async fn save_session(&self, session_id: &str, data: &PersistentSessionData);
 }
 
@@ -28,12 +43,16 @@ impl FileStorage {
 
 #[async_trait]
 impl Storage for FileStorage {
-    async fn load_session(&self, session_id: &str) -> Result<PersistentSessionData, String> {
+    async fn load_session(&self, session_id: &str) -> Result<PersistentSessionData, StorageError> {
         let path = self.session_dir.join(format!("{session_id}.ybss"));
-        let payload = tokio::fs::read(path)
-            .await
-            .map_err(|e| format!("Failed to read session file for {session_id}: {e}"))?;
-        decode_data(&payload)
+        let payload = tokio::fs::read(path).await.map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                StorageError::NotFound
+            } else {
+                StorageError::Other(format!("Failed to read session file for {session_id}: {e}"))
+            }
+        })?;
+        decode_data(&payload).map_err(StorageError::Other)
     }
 
     async fn save_session(&self, session_id: &str, data: &PersistentSessionData) {
@@ -142,7 +161,7 @@ impl S3Storage {
 
 #[async_trait]
 impl Storage for S3Storage {
-    async fn load_session(&self, session_id: &str) -> Result<PersistentSessionData, String> {
+    async fn load_session(&self, session_id: &str) -> Result<PersistentSessionData, StorageError> {
         let key = self.object_key(session_id);
         let response = self
             .client
@@ -156,23 +175,23 @@ impl Storage for S3Storage {
             Err(error) => {
                 if let Some(service_error) = error.as_service_error() {
                     if service_error.is_no_such_key() {
-                        return Err(format!("Session {session_id} not found"));
+                        return Err(StorageError::NotFound);
                     }
                 }
-                return Err(format!(
+                return Err(StorageError::Other(format!(
                     "Failed to load session {session_id} from s3: {error:?}"
-                ));
+                )));
             }
         };
         let bytes = match output.body.collect().await {
             Ok(collected) => collected.into_bytes(),
             Err(error) => {
-                return Err(format!(
+                return Err(StorageError::Other(format!(
                     "Failed to read session {session_id} from s3 response: {error:?}"
-                ));
+                )));
             }
         };
-        decode_data(&bytes)
+        decode_data(&bytes).map_err(StorageError::Other)
     }
 
     async fn save_session(&self, session_id: &str, data: &PersistentSessionData) {

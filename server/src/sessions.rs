@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::logic::sanitize_strokes;
 use crate::state::{AppState, PersistentSessionData, Session};
+use crate::storage::StorageError;
 use uuid::Uuid;
 
 pub fn new_session_id() -> String {
@@ -13,21 +14,29 @@ pub fn normalize_session_id(value: &str) -> Option<String> {
     Some(parsed.to_string())
 }
 
+pub enum SessionLoadError {
+    Storage(String),
+}
+
 pub async fn get_or_create_session(
     state: &AppState,
     session_id: &str,
-) -> Arc<tokio::sync::RwLock<Session>> {
+) -> Result<Arc<tokio::sync::RwLock<Session>>, SessionLoadError> {
     if let Some(session) = state.sessions.read().await.get(session_id).cloned() {
-        return session;
+        return Ok(session);
     }
     eprintln!("Loading/Creating session {session_id}...");
     let res = state.storage.load_session(session_id).await;
 
     let data = match res {
         Ok(data) => data,
-        Err(err) => {
-            eprintln!("Could not load session {session_id}: {err}\nCreating new session.");
+        Err(StorageError::NotFound) => {
+            eprintln!("Session {session_id} not found. Creating new session.");
             PersistentSessionData::default()
+        }
+        Err(StorageError::Other(err)) => {
+            eprintln!("Could not load session {session_id}: {err}");
+            return Err(SessionLoadError::Storage(err));
         }
     };
 
@@ -41,7 +50,7 @@ pub async fn get_or_create_session(
     let entry = sessions
         .entry(session_id.to_string())
         .or_insert_with(|| session.clone());
-    entry.clone()
+    Ok(entry.clone())
 }
 
 pub async fn save_session(state: &AppState, session_id: &str, data: &PersistentSessionData) {

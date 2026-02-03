@@ -88,6 +88,25 @@ fn palette_selected(mode: &Mode) -> Option<usize> {
     }
 }
 
+fn handle_load_error_banner(window: &web_sys::Window, ui: &Ui) {
+    let Ok(search) = window.location().search() else {
+        return;
+    };
+    if search.is_empty() {
+        return;
+    }
+    let query = search.trim_start_matches('?');
+    let has_error = query.split('&').any(|pair| {
+        let mut parts = pair.splitn(2, '=');
+        matches!(parts.next(), Some("load_error"))
+    });
+    if !has_error {
+        return;
+    }
+    ui.set_status("closed", "Load error");
+    ui.show_reload_banner("Failed to load session. Started a new session.");
+}
+
 fn take_loading_previous(state: &mut State) -> Option<Mode> {
     let placeholder = Mode::Pan(PanMode::Idle);
     match std::mem::replace(&mut state.mode, placeholder) {
@@ -181,6 +200,7 @@ fn start_app() -> Result<(), JsValue> {
         render_palette(&ui.document, &ui.palette_el, &state.palette, selected);
         ui.show_color_input(selected);
     }
+    handle_load_error_banner(&window, &ui);
 
     let ws_sender = connect_ws(&window, {
         let ui = ui.clone();
