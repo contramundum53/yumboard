@@ -213,7 +213,7 @@ fn start_app() -> Result<(), JsValue> {
                 let mut needs_redraw = false;
                 match message {
                     ServerMessage::Sync { strokes } => {
-                        adopt_strokes(&mut state, &ui.ctx, strokes);
+                        adopt_strokes(&mut state, &ui.ctx, strokes, false);
                     }
                     ServerMessage::StrokeStart {
                         id,
@@ -855,7 +855,7 @@ fn start_app() -> Result<(), JsValue> {
                     };
                     state.mode = previous;
                     if let Some(strokes) = strokes.as_ref() {
-                        adopt_strokes(&mut state, &ui_onload.ctx, strokes.clone());
+                        adopt_strokes(&mut state, &ui_onload.ctx, strokes.clone(), true);
                     }
                 }
                 ui_onload.set_load_busy(false);

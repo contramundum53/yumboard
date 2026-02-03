@@ -179,6 +179,7 @@ pub fn adopt_strokes(
     state: &mut State,
     ctx: &web_sys::CanvasRenderingContext2d,
     strokes: Vec<Stroke>,
+    reset_view: bool,
 ) {
     let mut sanitized = Vec::with_capacity(strokes.len());
     for mut stroke in strokes {
@@ -196,10 +197,12 @@ pub fn adopt_strokes(
         select.mode = SelectMode::Idle;
     }
 
-    let (zoom, pan_x, pan_y) = home_zoom_pan(&state);
-    state.zoom = zoom;
-    state.pan_x = pan_x;
-    state.pan_y = pan_y;
+    if reset_view {
+        let (zoom, pan_x, pan_y) = home_zoom_pan(&state);
+        state.zoom = zoom;
+        state.pan_x = pan_x;
+        state.pan_y = pan_y;
+    }
     redraw(ctx, state);
 }
 
